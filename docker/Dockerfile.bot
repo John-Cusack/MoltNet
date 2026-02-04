@@ -1,0 +1,35 @@
+# MoltNet Bot - LLM Colony Agent
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Copy project files
+COPY pyproject.toml .
+COPY uv.lock* .
+
+# Install dependencies with uv
+RUN uv sync --frozen --no-dev
+
+# Copy application code
+COPY clawdbot/ clawdbot/
+COPY config/ config/
+
+# Environment variables (override at runtime)
+ENV LLM_REGISTRY_PATH=/app/config/llm-registry.yaml
+ENV OBSERVATORY_URL=http://observatory:9100
+
+# Default bot settings
+ENV BOT_NAME=bot-alpha
+ENV BOT_GENERATION=1
+ENV BOT_CYCLES=1000
+ENV BOT_INTERVAL=30
+
+# Run the bot using shell to expand environment variables
+CMD uv run python -m clawdbot.bot \
+    --name "$BOT_NAME" \
+    --generation "$BOT_GENERATION" \
+    --cycles "$BOT_CYCLES" \
+    --interval "$BOT_INTERVAL"

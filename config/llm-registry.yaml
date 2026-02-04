@@ -1,0 +1,510 @@
+# MoltNet LLM Registry - Master Catalog
+# All available models with pricing, capabilities, and metadata
+
+providers:
+  ollama:
+    name: "Ollama (Local)"
+    base_url: "http://localhost:11434"
+    auth_env: null
+    api_format: "ollama"
+
+  anthropic:
+    name: "Anthropic"
+    base_url: "https://api.anthropic.com"
+    auth_env: "ANTHROPIC_API_KEY"
+    api_format: "anthropic"
+
+  openai:
+    name: "OpenAI"
+    base_url: "https://api.openai.com/v1"
+    auth_env: "OPENAI_API_KEY"
+    api_format: "openai_compatible"
+
+  deepseek:
+    name: "DeepSeek"
+    base_url: "https://api.deepseek.com/v1"
+    auth_env: "DEEPSEEK_API_KEY"
+    api_format: "openai_compatible"
+
+  mistral:
+    name: "Mistral AI"
+    base_url: "https://api.mistral.ai/v1"
+    auth_env: "MISTRAL_API_KEY"
+    api_format: "openai_compatible"
+
+  zhipu:
+    name: "Zhipu AI (GLM)"
+    base_url: "https://open.bigmodel.cn/api/paas/v4"
+    auth_env: "ZHIPU_API_KEY"
+    api_format: "openai_compatible"
+
+  claude_code:
+    name: "Claude Code CLI (Max Plan)"
+    base_url: ""
+    auth_env: null  # Uses CLI authentication
+    api_format: "claude_code"
+
+  cerebras:
+    name: "Cerebras (High-Speed)"
+    base_url: "https://api.cerebras.ai/v1"
+    auth_env: "CEREBRAS_API_KEY"
+    api_format: "cerebras"
+
+models:
+  # ============================================================
+  # Ollama (Local) - Free tier, self-hosted
+  # ============================================================
+  ollama/phi4-mini:
+    display_name: "Phi-4 Mini (Local)"
+    provider: ollama
+    model_id: "phi4-mini"
+    context_window: 16384
+    max_output_tokens: 4096
+    cost_per_1k_input: 0.0
+    cost_per_1k_output: 0.0
+    quality_tier: 2
+    strengths:
+      - reasoning
+      - code
+      - math
+    weaknesses:
+      - long_context
+      - creative_writing
+    notes: "Microsoft's compact reasoning model. Good for local dev/testing."
+
+  ollama/llama3.2:
+    display_name: "Llama 3.2 3B (Local)"
+    provider: ollama
+    model_id: "llama3.2"
+    context_window: 131072
+    max_output_tokens: 4096
+    cost_per_1k_input: 0.0
+    cost_per_1k_output: 0.0
+    quality_tier: 2
+    strengths:
+      - general
+      - instruction_following
+    weaknesses:
+      - complex_reasoning
+      - specialized_knowledge
+    notes: "Meta's efficient small model. Good balance of speed and capability."
+
+  ollama/qwen2.5-coder:
+    display_name: "Qwen 2.5 Coder 7B (Local)"
+    provider: ollama
+    model_id: "qwen2.5-coder"
+    context_window: 32768
+    max_output_tokens: 8192
+    cost_per_1k_input: 0.0
+    cost_per_1k_output: 0.0
+    quality_tier: 2
+    strengths:
+      - code
+      - debugging
+      - code_review
+    weaknesses:
+      - creative_writing
+      - general_knowledge
+    notes: "Alibaba's code-specialized model. Excellent for programming tasks."
+
+  ollama/deepseek-r1:
+    display_name: "DeepSeek R1 7B (Local)"
+    provider: ollama
+    model_id: "deepseek-r1"
+    context_window: 65536
+    max_output_tokens: 8192
+    cost_per_1k_input: 0.0
+    cost_per_1k_output: 0.0
+    quality_tier: 3
+    strengths:
+      - reasoning
+      - math
+      - code
+    weaknesses:
+      - speed
+      - creative_writing
+    notes: "DeepSeek's reasoning model distilled. Chain-of-thought built in."
+
+  # ============================================================
+  # Anthropic Claude - Premium tier
+  # ============================================================
+  anthropic/claude-sonnet-4-5:
+    display_name: "Claude Sonnet 4.5"
+    provider: anthropic
+    model_id: "claude-sonnet-4-5-20250514"
+    context_window: 200000
+    max_output_tokens: 16384
+    cost_per_1k_input: 0.003
+    cost_per_1k_output: 0.015
+    quality_tier: 4
+    strengths:
+      - reasoning
+      - code
+      - analysis
+      - instruction_following
+    weaknesses:
+      - cost
+    notes: "Best balanced Claude model. Excellent for complex tasks."
+
+  anthropic/claude-haiku-3-5:
+    display_name: "Claude Haiku 3.5"
+    provider: anthropic
+    model_id: "claude-3-5-haiku-20241022"
+    context_window: 200000
+    max_output_tokens: 8192
+    cost_per_1k_input: 0.0008
+    cost_per_1k_output: 0.004
+    quality_tier: 3
+    strengths:
+      - speed
+      - cost_efficiency
+      - instruction_following
+    weaknesses:
+      - complex_reasoning
+      - nuanced_analysis
+    notes: "Fast and cheap Claude. Great for high-volume simple tasks."
+
+  anthropic/claude-opus-4:
+    display_name: "Claude Opus 4"
+    provider: anthropic
+    model_id: "claude-opus-4-20250514"
+    context_window: 200000
+    max_output_tokens: 32000
+    cost_per_1k_input: 0.015
+    cost_per_1k_output: 0.075
+    quality_tier: 4
+    strengths:
+      - complex_reasoning
+      - creative_writing
+      - research
+      - analysis
+    weaknesses:
+      - cost
+      - speed
+    notes: "Most capable Claude. Use for hardest problems only."
+
+  # ============================================================
+  # OpenAI - Industry standard
+  # ============================================================
+  openai/gpt-4o:
+    display_name: "GPT-4o"
+    provider: openai
+    model_id: "gpt-4o"
+    context_window: 128000
+    max_output_tokens: 16384
+    cost_per_1k_input: 0.0025
+    cost_per_1k_output: 0.01
+    quality_tier: 4
+    strengths:
+      - general
+      - code
+      - multimodal
+    weaknesses:
+      - cost
+    notes: "OpenAI's flagship multimodal model."
+
+  openai/gpt-4o-mini:
+    display_name: "GPT-4o Mini"
+    provider: openai
+    model_id: "gpt-4o-mini"
+    context_window: 128000
+    max_output_tokens: 16384
+    cost_per_1k_input: 0.00015
+    cost_per_1k_output: 0.0006
+    quality_tier: 3
+    strengths:
+      - speed
+      - cost_efficiency
+      - general
+    weaknesses:
+      - complex_reasoning
+    notes: "Cheap and fast. Good for simple tasks."
+
+  openai/o1:
+    display_name: "OpenAI o1"
+    provider: openai
+    model_id: "o1"
+    context_window: 200000
+    max_output_tokens: 100000
+    cost_per_1k_input: 0.015
+    cost_per_1k_output: 0.06
+    quality_tier: 4
+    strengths:
+      - reasoning
+      - math
+      - code
+      - science
+    weaknesses:
+      - cost
+      - speed
+      - creative_writing
+    notes: "Reasoning model with internal chain-of-thought. Best for hard problems."
+
+  openai/o3-mini:
+    display_name: "OpenAI o3-mini"
+    provider: openai
+    model_id: "o3-mini"
+    context_window: 200000
+    max_output_tokens: 100000
+    cost_per_1k_input: 0.00115
+    cost_per_1k_output: 0.0044
+    quality_tier: 3
+    strengths:
+      - reasoning
+      - math
+      - code
+    weaknesses:
+      - creative_writing
+    notes: "Efficient reasoning model. Good value for analytical tasks."
+
+  # ============================================================
+  # DeepSeek - Value tier
+  # ============================================================
+  deepseek/deepseek-chat:
+    display_name: "DeepSeek Chat V3"
+    provider: deepseek
+    model_id: "deepseek-chat"
+    context_window: 65536
+    max_output_tokens: 8192
+    cost_per_1k_input: 0.00014
+    cost_per_1k_output: 0.00028
+    quality_tier: 3
+    strengths:
+      - code
+      - math
+      - cost_efficiency
+    weaknesses:
+      - creative_writing
+      - nuanced_analysis
+    notes: "Extremely cost-effective. Surprisingly capable for the price."
+
+  deepseek/deepseek-reasoner:
+    display_name: "DeepSeek R1"
+    provider: deepseek
+    model_id: "deepseek-reasoner"
+    context_window: 65536
+    max_output_tokens: 8192
+    cost_per_1k_input: 0.00055
+    cost_per_1k_output: 0.00219
+    quality_tier: 4
+    strengths:
+      - reasoning
+      - math
+      - code
+    weaknesses:
+      - speed
+      - creative_writing
+    notes: "Chain-of-thought reasoning. Great for complex analytical tasks."
+
+  # ============================================================
+  # Mistral - European alternative
+  # ============================================================
+  mistral/mistral-large:
+    display_name: "Mistral Large"
+    provider: mistral
+    model_id: "mistral-large-latest"
+    context_window: 131072
+    max_output_tokens: 8192
+    cost_per_1k_input: 0.002
+    cost_per_1k_output: 0.006
+    quality_tier: 4
+    strengths:
+      - reasoning
+      - multilingual
+      - code
+    weaknesses:
+      - creative_writing
+    notes: "Mistral's flagship. Strong multilingual and reasoning capabilities."
+
+  mistral/codestral:
+    display_name: "Codestral"
+    provider: mistral
+    model_id: "codestral-latest"
+    context_window: 32768
+    max_output_tokens: 8192
+    cost_per_1k_input: 0.0003
+    cost_per_1k_output: 0.0009
+    quality_tier: 3
+    strengths:
+      - code
+      - debugging
+      - code_review
+    weaknesses:
+      - general_knowledge
+      - creative_writing
+    notes: "Code-specialized model. Excellent for programming tasks."
+
+  mistral/mistral-small:
+    display_name: "Mistral Small"
+    provider: mistral
+    model_id: "mistral-small-latest"
+    context_window: 32768
+    max_output_tokens: 8192
+    cost_per_1k_input: 0.0001
+    cost_per_1k_output: 0.0003
+    quality_tier: 2
+    strengths:
+      - speed
+      - cost_efficiency
+    weaknesses:
+      - complex_reasoning
+    notes: "Fast and cheap. Good for simple classification and extraction."
+
+  # ============================================================
+  # Zhipu (GLM) - Chinese market
+  # ============================================================
+  zhipu/glm-4-plus:
+    display_name: "GLM-4 Plus"
+    provider: zhipu
+    model_id: "glm-4-plus"
+    context_window: 131072
+    max_output_tokens: 4096
+    cost_per_1k_input: 0.0007
+    cost_per_1k_output: 0.0007
+    quality_tier: 3
+    strengths:
+      - chinese
+      - general
+      - code
+    weaknesses:
+      - english_nuance
+    notes: "Strong Chinese language model. Good general capabilities."
+
+  zhipu/glm-4-flash:
+    display_name: "GLM-4 Flash"
+    provider: zhipu
+    model_id: "glm-4-flash"
+    context_window: 131072
+    max_output_tokens: 4096
+    cost_per_1k_input: 0.0001
+    cost_per_1k_output: 0.0001
+    quality_tier: 2
+    strengths:
+      - speed
+      - chinese
+      - cost_efficiency
+    weaknesses:
+      - complex_reasoning
+      - english
+    notes: "Fast and cheap. Good for high-volume Chinese tasks."
+
+  # ============================================================
+  # Claude Code CLI - Max Plan (pay per subscription, not token)
+  # ============================================================
+  claude_code/sonnet-4-5:
+    display_name: "Claude Sonnet 4.5 (Max Plan)"
+    provider: claude_code
+    model_id: "claude-sonnet-4-5-20250514"
+    context_window: 200000
+    max_output_tokens: 16384
+    cost_per_1k_input: 0.0  # Covered by Max subscription
+    cost_per_1k_output: 0.0  # Covered by Max subscription
+    quality_tier: 4
+    strengths:
+      - reasoning
+      - code
+      - analysis
+      - instruction_following
+    weaknesses:
+      - latency  # CLI has subprocess overhead
+    notes: "Claude via Max subscription. No per-token cost, higher latency."
+
+  claude_code/opus-4:
+    display_name: "Claude Opus 4 (Max Plan)"
+    provider: claude_code
+    model_id: "claude-opus-4-20250514"
+    context_window: 200000
+    max_output_tokens: 32000
+    cost_per_1k_input: 0.0
+    cost_per_1k_output: 0.0
+    quality_tier: 4
+    strengths:
+      - complex_reasoning
+      - creative_writing
+      - research
+      - analysis
+    weaknesses:
+      - latency
+      - speed
+    notes: "Most capable Claude via Max subscription."
+
+  # ============================================================
+  # Cerebras - Ultra-fast inference
+  # ============================================================
+  cerebras/llama-3.3-70b:
+    display_name: "Llama 3.3 70B (Cerebras)"
+    provider: cerebras
+    model_id: "llama-3.3-70b"
+    context_window: 8192
+    max_output_tokens: 8192
+    cost_per_1k_input: 0.0  # Varies by plan
+    cost_per_1k_output: 0.0  # Varies by plan
+    quality_tier: 4
+    strengths:
+      - speed
+      - general
+      - code
+      - reasoning
+    weaknesses:
+      - context_window
+    notes: "Extremely fast inference on Cerebras hardware."
+
+  cerebras/llama-3.1-8b:
+    display_name: "Llama 3.1 8B (Cerebras)"
+    provider: cerebras
+    model_id: "llama-3.1-8b"
+    context_window: 8192
+    max_output_tokens: 8192
+    cost_per_1k_input: 0.0
+    cost_per_1k_output: 0.0
+    quality_tier: 3
+    strengths:
+      - speed
+      - cost_efficiency
+      - general
+    weaknesses:
+      - complex_reasoning
+      - context_window
+    notes: "Fast and efficient for simpler tasks."
+
+# Task type mappings for routing decisions
+task_routing:
+  code:
+    best: ["anthropic/claude-sonnet-4-5", "openai/gpt-4o", "mistral/codestral"]
+    budget: ["deepseek/deepseek-chat", "ollama/qwen2.5-coder", "mistral/codestral"]
+    free: ["ollama/qwen2.5-coder", "ollama/phi4-mini"]
+
+  reasoning:
+    best: ["anthropic/claude-opus-4", "openai/o1", "deepseek/deepseek-reasoner"]
+    budget: ["deepseek/deepseek-reasoner", "openai/o3-mini", "ollama/deepseek-r1"]
+    free: ["ollama/deepseek-r1", "ollama/phi4-mini"]
+
+  general:
+    best: ["anthropic/claude-sonnet-4-5", "openai/gpt-4o"]
+    budget: ["deepseek/deepseek-chat", "openai/gpt-4o-mini"]
+    free: ["ollama/llama3.2", "ollama/phi4-mini"]
+
+  creative_writing:
+    best: ["anthropic/claude-opus-4", "anthropic/claude-sonnet-4-5"]
+    budget: ["anthropic/claude-haiku-3-5", "openai/gpt-4o-mini"]
+    free: ["ollama/llama3.2"]
+
+  math:
+    best: ["openai/o1", "deepseek/deepseek-reasoner", "anthropic/claude-sonnet-4-5"]
+    budget: ["deepseek/deepseek-reasoner", "openai/o3-mini"]
+    free: ["ollama/deepseek-r1", "ollama/phi4-mini"]
+
+  analysis:
+    best: ["anthropic/claude-sonnet-4-5", "openai/gpt-4o"]
+    budget: ["deepseek/deepseek-chat", "anthropic/claude-haiku-3-5"]
+    free: ["ollama/phi4-mini", "ollama/llama3.2"]
+
+  chinese:
+    best: ["zhipu/glm-4-plus", "deepseek/deepseek-chat"]
+    budget: ["zhipu/glm-4-flash", "deepseek/deepseek-chat"]
+    free: ["ollama/qwen2.5-coder"]
+
+  multilingual:
+    best: ["mistral/mistral-large", "anthropic/claude-sonnet-4-5"]
+    budget: ["mistral/mistral-small", "deepseek/deepseek-chat"]
+    free: ["ollama/llama3.2"]

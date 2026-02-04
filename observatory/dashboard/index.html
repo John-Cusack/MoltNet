@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoltNet Observatory</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>MoltNet Observatory</h1>
+        <div class="header-status">
+            <span id="connection-status" class="status-indicator">Connecting...</span>
+            <span id="last-update"></span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Colony Stats -->
+        <section class="stats-grid">
+            <div class="stat-card">
+                <h3>Active Bots</h3>
+                <div class="stat-value" id="stat-active-bots">-</div>
+                <div class="stat-label">of <span id="stat-total-bots">-</span> total</div>
+            </div>
+            <div class="stat-card">
+                <h3>Avg Fitness</h3>
+                <div class="stat-value" id="stat-avg-fitness">-</div>
+                <div class="stat-label">colony average</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Revenue</h3>
+                <div class="stat-value" id="stat-revenue">-</div>
+                <div class="stat-label">this hour</div>
+            </div>
+            <div class="stat-card">
+                <h3>API Spend</h3>
+                <div class="stat-value" id="stat-api-spend">-</div>
+                <div class="stat-label">this hour</div>
+            </div>
+        </section>
+
+        <!-- Charts Row -->
+        <section class="charts-row">
+            <div class="chart-card">
+                <h3>Colony Fitness Over Time</h3>
+                <canvas id="fitness-chart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Wallet Balance</h3>
+                <canvas id="wallet-chart"></canvas>
+            </div>
+        </section>
+
+        <!-- Brain Leaderboard & Bot List -->
+        <section class="data-row">
+            <div class="data-card">
+                <h3>Brain Leaderboard</h3>
+                <table id="brain-leaderboard">
+                    <thead>
+                        <tr>
+                            <th>Model</th>
+                            <th>Uses</th>
+                            <th>Avg Fitness</th>
+                            <th>Revenue</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="data-card">
+                <h3>Active Bots</h3>
+                <table id="bot-list">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Gen</th>
+                            <th>Fitness</th>
+                            <th>State</th>
+                            <th>Brain</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Recent Events -->
+        <section class="events-section">
+            <h3>Recent Events</h3>
+            <div id="events-list" class="events-list"></div>
+        </section>
+    </main>
+
+    <footer>
+        <p>MoltNet Observatory v0.1.0 | Refreshing every <span id="poll-interval">5</span>s</p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
