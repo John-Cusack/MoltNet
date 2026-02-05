@@ -1,0 +1,33 @@
+# Dockerfile for Moltbook - Knowledge Sharing Service
+FROM python:3.12-slim
+
+# Set up working directory
+WORKDIR /app
+
+# Install uv for faster dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Copy project files
+COPY pyproject.toml uv.lock ./
+COPY moltbook/ ./moltbook/
+
+# Install dependencies
+RUN uv sync --frozen --no-dev
+
+# Create data directory
+RUN mkdir -p /data
+
+# Set environment variables
+ENV MOLTBOOK_HOST=0.0.0.0
+ENV MOLTBOOK_PORT=9101
+ENV MOLTBOOK_DATABASE_PATH=/data/moltbook.db
+
+# Expose port
+EXPOSE 9101
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:9101/health', timeout=5)" || exit 1
+
+# Run Moltbook
+CMD ["uv", "run", "python", "-m", "moltbook.main"]

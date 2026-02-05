@@ -1,0 +1,308 @@
+# MoltNet OpenClaw Colony - Docker Compose
+#
+# Architecture:
+#   - Gateway service runs on HOST (not in container) to access Claude CLI
+#   - Claude bots call gateway via host.docker.internal
+#   - GLM bots call Cerebras API directly (self-contained)
+#
+# Usage:
+#   # 1. First, start the gateway on the HOST:
+#   cd /home/john/repos/MoltNet
+#   uv run python -m clawdbot.gateway.service --port 8080 --claude-slots 2
+#
+#   # 2. Then start the containers:
+#   cd docker
+#   docker compose -f docker-compose.openclaw.yml up -d
+#
+# View logs:
+#   docker compose -f docker-compose.openclaw.yml logs -f bot-claude-1
+#   Or check: ./workspaces/bot-claude-1/logs/
+#
+# Dashboard:
+#   http://localhost:9100
+#
+# Moltbook (Knowledge Base):
+#   http://localhost:9101
+#
+# MoltGit (Code Repository):
+#   http://localhost:9103
+
+services:
+  # Observatory - Telemetry Dashboard
+  observatory:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.observatory
+    ports:
+      - "9100:9100"
+    volumes:
+      - ../data/observatory:/data
+      - ../data/archives:/data/archives
+    environment:
+      - OBSERVATORY_HOST=0.0.0.0
+      - OBSERVATORY_PORT=9100
+      - OBSERVATORY_DATABASE_PATH=/data/observatory.db
+      - OBSERVATORY_ARCHIVE_PATH=/data/archives
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-c", "import httpx; httpx.get('http://localhost:9100/health', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  # Moltbook - Knowledge Sharing Service
+  moltbook:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.moltbook
+    ports:
+      - "9101:9101"
+    volumes:
+      - ../data/moltbook:/data
+    environment:
+      - MOLTBOOK_HOST=0.0.0.0
+      - MOLTBOOK_PORT=9101
+      - MOLTBOOK_DATABASE_PATH=/data/moltbook.db
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-c", "import httpx; httpx.get('http://localhost:9101/health', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+
+  # MoltGit - Code Repository Service
+  moltgit:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.moltgit
+    ports:
+      - "9103:9103"
+    volumes:
+      - ../data/moltgit:/data
+    environment:
+      - MOLTGIT_HOST=0.0.0.0
+      - MOLTGIT_PORT=9103
+      - MOLTGIT_DATABASE_PATH=/data/moltgit.db
+      - MOLTBOOK_URL=http://moltbook:9101
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-c", "import httpx; httpx.get('http://localhost:9103/health', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+
+  # Analyzer - Conversation Analysis & Visualization
+  analyzer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.analyzer
+    ports:
+      - "9102:9102"
+    volumes:
+      - ../data/analyzer:/data
+    environment:
+      - ANALYZER_HOST=0.0.0.0
+      - ANALYZER_PORT=9102
+      - ANALYZER_DATA_DIR=/data
+      - CONVERSATION_LOG_ENABLED=true
+      - REFLECTION_ENABLED=true
+      - REFLECTION_INTERVAL_CYCLES=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9102/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  # ============================================================
+  # CLAUDE BOTS - Use Gateway to access Claude CLI on host
+  # These require the gateway service to be running on the host
+  # ============================================================
+
+  bot-claude-1:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.openclaw
+    user: "1000:1000"
+    depends_on:
+      observatory:
+        condition: service_healthy
+      moltbook:
+        condition: service_healthy
+      moltgit:
+        condition: service_healthy
+    volumes:
+      - ../workspaces/bot-claude-1:/workspace
+      - ../logs/bot-claude-1:/logs
+    environment:
+      - HOME=/home/botuser
+      - BOT_NAME=bot-claude-1
+      - BOT_BALANCE=0.50
+      - BOT_CYCLES=100
+      - BOT_MODEL=claude_code/opus-4-5
+      - OBSERVATORY_URL=http://observatory:9100
+      - MOLTBOOK_URL=http://moltbook:9101
+      - MOLTGIT_URL=http://moltgit:9103
+      - BOT_LOG_DIR=/logs
+      # Gateway URL for Claude bots (points to host)
+      - GATEWAY_URL=http://host.docker.internal:8080
+      # Analyzer settings
+      - ANALYZER_DATA_DIR=/data
+      - CONVERSATION_LOG_ENABLED=true
+      - REFLECTION_ENABLED=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  bot-claude-2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.openclaw
+    user: "1000:1000"
+    depends_on:
+      observatory:
+        condition: service_healthy
+      moltbook:
+        condition: service_healthy
+      moltgit:
+        condition: service_healthy
+    volumes:
+      - ../workspaces/bot-claude-2:/workspace
+      - ../logs/bot-claude-2:/logs
+    environment:
+      - HOME=/home/botuser
+      - BOT_NAME=bot-claude-2
+      - BOT_BALANCE=0.50
+      - BOT_CYCLES=100
+      - BOT_MODEL=claude_code/opus-4-5
+      - OBSERVATORY_URL=http://observatory:9100
+      - MOLTBOOK_URL=http://moltbook:9101
+      - MOLTGIT_URL=http://moltgit:9103
+      - BOT_LOG_DIR=/logs
+      - GATEWAY_URL=http://host.docker.internal:8080
+      # Analyzer settings
+      - ANALYZER_DATA_DIR=/data
+      - CONVERSATION_LOG_ENABLED=true
+      - REFLECTION_ENABLED=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  # ============================================================
+  # CEREBRAS BOTS - Self-contained with direct API access
+  # These do NOT require the gateway - they call Cerebras API directly
+  # ============================================================
+
+  bot-cerebras-1:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.openclaw
+    user: "1000:1000"
+    depends_on:
+      observatory:
+        condition: service_healthy
+      moltbook:
+        condition: service_healthy
+      moltgit:
+        condition: service_healthy
+    volumes:
+      - ../workspaces/bot-cerebras-1:/workspace
+      - ../logs/bot-cerebras-1:/logs
+    env_file:
+      - ../.env
+    environment:
+      - HOME=/home/botuser
+      - BOT_NAME=bot-cerebras-1
+      - BOT_BALANCE=0.50
+      - BOT_CYCLES=100
+      - BOT_MODEL=cerebras/zai-glm-4.7
+      - OBSERVATORY_URL=http://observatory:9100
+      - MOLTBOOK_URL=http://moltbook:9101
+      - MOLTGIT_URL=http://moltgit:9103
+      - BOT_LOG_DIR=/logs
+      # Analyzer settings
+      - ANALYZER_DATA_DIR=/data
+      - CONVERSATION_LOG_ENABLED=true
+      - REFLECTION_ENABLED=true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  bot-cerebras-2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.openclaw
+    user: "1000:1000"
+    depends_on:
+      observatory:
+        condition: service_healthy
+      moltbook:
+        condition: service_healthy
+      moltgit:
+        condition: service_healthy
+    volumes:
+      - ../workspaces/bot-cerebras-2:/workspace
+      - ../logs/bot-cerebras-2:/logs
+    env_file:
+      - ../.env
+    environment:
+      - HOME=/home/botuser
+      - BOT_NAME=bot-cerebras-2
+      - BOT_BALANCE=0.50
+      - BOT_CYCLES=100
+      - BOT_MODEL=cerebras/zai-glm-4.7
+      - OBSERVATORY_URL=http://observatory:9100
+      - MOLTBOOK_URL=http://moltbook:9101
+      - MOLTGIT_URL=http://moltgit:9103
+      - BOT_LOG_DIR=/logs
+      # Analyzer settings
+      - ANALYZER_DATA_DIR=/data
+      - CONVERSATION_LOG_ENABLED=true
+      - REFLECTION_ENABLED=true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+networks:
+  default:
+    name: moltnet-openclaw

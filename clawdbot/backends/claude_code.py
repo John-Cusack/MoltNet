@@ -57,14 +57,18 @@ class ClaudeCodeBackend(LLMBackend):
         # Build the command
         cmd = [self.claude_path, "--print"]
 
+        # Use --model to specify the model
+        if self.model_id:
+            cmd.extend(["--model", self.model_id])
+
         if system:
-            cmd.extend(["--system", system])
+            cmd.extend(["--append-system-prompt", system])
 
-        if max_tokens:
-            cmd.extend(["--max-tokens", str(max_tokens)])
+        # Claude CLI uses --max-budget-usd instead of max-tokens
+        # We skip this as Max plan doesn't need budget limits
 
-        # Add the prompt
-        cmd.extend(["--prompt", prompt])
+        # Add the prompt as positional argument
+        cmd.append(prompt)
 
         try:
             process = await asyncio.create_subprocess_exec(

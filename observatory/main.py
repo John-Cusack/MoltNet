@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from observatory.archival import archiver
 from observatory.config import settings
 from observatory.database import db
 from observatory.models import (
@@ -26,13 +28,53 @@ from observatory.models import (
 )
 
 
+# Background cleanup task reference
+_cleanup_task: asyncio.Task | None = None
+
+
+async def daily_cleanup_loop():
+    """Background task that runs cleanup once per day."""
+    while True:
+        try:
+            # Wait 24 hours
+            await asyncio.sleep(86400)
+
+            # Archive old data first
+            archive_stats = await archiver.archive_old_data()
+            print(f"[Cleanup] Archived: {archive_stats}")
+
+            # Then delete old data
+            tel_deleted, evt_deleted = await db.cleanup_old_data()
+            print(f"[Cleanup] Deleted: {tel_deleted} telemetry, {evt_deleted} events")
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[Cleanup] Error: {e}")
+            # Continue running despite errors
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
+    global _cleanup_task
+
     # Startup
     await db.connect()
+
+    # Start background cleanup task
+    _cleanup_task = asyncio.create_task(daily_cleanup_loop())
+
     yield
+
     # Shutdown
+    if _cleanup_task:
+        _cleanup_task.cancel()
+        try:
+            await _cleanup_task
+        except asyncio.CancelledError:
+            pass
+
     await db.close()
 
 
@@ -154,8 +196,12 @@ async def get_current_colony(since_seconds: int = Query(default=300, ge=60, le=3
 
 
 @app.get("/api/colony/stats", response_model=ColonyStats)
-async def get_colony_stats(since_seconds: int = Query(default=3600, ge=60, le=86400)):
-    """Get aggregate colony statistics."""
+async def get_colony_stats(since_seconds: int = Query(default=3600, ge=60, le=604800)):
+    """Get aggregate colony statistics.
+
+    Args:
+        since_seconds: Time window (max 7 days = 604800 seconds)
+    """
     stats = await db.get_colony_stats(since_seconds=since_seconds)
     return ColonyStats(**stats)
 
@@ -182,12 +228,17 @@ async def get_brain_leaderboard(limit: int = Query(default=10, ge=1, le=100)):
 @app.get("/api/timeseries/{metric}")
 async def get_time_series(
     metric: str,
-    since_seconds: int = Query(default=3600, ge=60, le=86400),
-    bucket_seconds: int = Query(default=60, ge=10, le=3600),
+    since_seconds: int = Query(default=3600, ge=60, le=604800),
+    bucket_seconds: int = Query(default=60, ge=10, le=7200),
 ):
     """Get time series data for a metric.
 
     Valid metrics: fitness_score, wallet_balance, cycle_revenue, cycle_api_spend
+
+    Args:
+        metric: Metric to retrieve
+        since_seconds: Time window (max 7 days = 604800 seconds)
+        bucket_seconds: Aggregation bucket size (max 2 hours = 7200 seconds)
     """
     valid_metrics = {"fitness_score", "wallet_balance", "cycle_revenue", "cycle_api_spend"}
     if metric not in valid_metrics:
@@ -231,9 +282,14 @@ async def get_recent_events(
 @app.get("/api/bots/{bot_name}")
 async def get_bot_details(
     bot_name: str,
-    since_seconds: int = Query(default=3600, ge=60, le=86400),
+    since_seconds: int = Query(default=3600, ge=60, le=604800),
 ):
-    """Get detailed telemetry history for a specific bot."""
+    """Get detailed telemetry history for a specific bot.
+
+    Args:
+        bot_name: Bot identifier
+        since_seconds: Time window (max 7 days = 604800 seconds)
+    """
     history = await db.get_bot_history(bot_name=bot_name, since_seconds=since_seconds)
 
     if not history:
@@ -281,6 +337,48 @@ async def cleanup_old_data():
         "events_deleted": evt_deleted,
         "timestamp": datetime.now(),
     }
+
+
+@app.post("/api/admin/archive")
+async def archive_old_data():
+    """Archive old data before cleanup.
+
+    Creates compressed JSONL files in the archives directory.
+    """
+    stats = await archiver.archive_old_data()
+    return {
+        "status": "ok",
+        **stats,
+        "timestamp": datetime.now(),
+    }
+
+
+# ==================== Archive Access ====================
+
+
+@app.get("/api/archives")
+async def list_archives():
+    """List all available data archives."""
+    archives = archiver.list_archives()
+    return {
+        "archives": archives,
+        "count": len(archives),
+        "archive_path": str(archiver.archive_path),
+    }
+
+
+@app.get("/api/archives/{filename}")
+async def download_archive(filename: str):
+    """Download a specific archive file."""
+    archive_path = archiver.get_archive_path(filename)
+    if archive_path is None:
+        raise HTTPException(status_code=404, detail="Archive not found")
+
+    return FileResponse(
+        path=archive_path,
+        filename=filename,
+        media_type="application/gzip",
+    )
 
 
 # ==================== Dashboard Config ====================

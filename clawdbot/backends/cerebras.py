@@ -21,7 +21,7 @@ class CerebrasBackend(LLMBackend):
 
     def __init__(
         self,
-        model_id: str = "llama-3.3-70b",
+        model_id: str = "zai-glm-4.7",
         api_key: str | None = None,
         base_url: str = "https://api.cerebras.ai/v1",
         cost_per_1k_input: float = 0.0,  # Varies by plan

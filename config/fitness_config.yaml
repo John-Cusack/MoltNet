@@ -1,0 +1,327 @@
+# MoltNet Fitness Configuration
+# Tunable parameters for evolutionary selection pressure
+
+# ============================================================
+# Economic Settings
+# ============================================================
+economy:
+  # Cost of existing per cycle (metabolism)
+  existence_cost_per_cycle: 0.0001
+
+  # Minimum viable balance before bankruptcy death
+  minimum_viable_balance: 0.001
+
+  # Starting balance for founder bots
+  seed_funding: 0.10
+
+  # Base cost to reproduce
+  replication_cost: 0.05
+
+  # Fraction of replication cost passed to child
+  child_inheritance_ratio: 0.8
+
+# ============================================================
+# Selection Pressure
+# ============================================================
+selection:
+  # Consecutive failures before starvation death
+  starvation_threshold: 20
+
+  # Enable periodic culling of weakest bots
+  enable_culling: false
+
+  # Cycles between culling events
+  culling_interval_cycles: 100
+
+  # Bottom percentage to cull (0.1 = 10%)
+  culling_bottom_percentile: 0.10
+
+# ============================================================
+# Task Tier Configuration
+# ============================================================
+tasks:
+  tiers:
+    # Tier 1: Simple tasks - procedurally generated
+    simple:
+      types:
+        - math
+        - json
+        - logic
+      difficulty_range: [0.0, 0.3]
+      sampling_weight: 1.0
+
+    # Tier 2: Medium tasks - function completion
+    medium:
+      types:
+        - code
+        - humaneval
+        - mbpp
+      difficulty_range: [0.3, 0.6]
+      sampling_weight: 1.0
+
+    # Tier 3: Hard tasks - multi-step programming
+    hard:
+      types:
+        - code
+        - humaneval_pro
+        - mbpp_pro
+        - algorithm
+      difficulty_range: [0.6, 0.85]
+      sampling_weight: 0.5
+
+    # Tier 4: Expert tasks - SWE-bench style
+    expert:
+      types:
+        - swe_lite
+        - feature_impl
+      difficulty_range: [0.85, 1.0]
+      sampling_weight: 0.2
+
+# ============================================================
+# Reward Structure
+# ============================================================
+rewards:
+  # Simple tier tasks
+  math:
+    base: 0.001
+    difficulty_bonus: 0.002
+    speed_bonus_threshold: 5.0
+    speed_bonus_amount: 0.0
+
+  json:
+    base: 0.002
+    difficulty_bonus: 0.003
+    speed_bonus_threshold: 5.0
+    speed_bonus_amount: 0.0
+
+  logic:
+    base: 0.002
+    difficulty_bonus: 0.003
+    speed_bonus_threshold: 5.0
+    speed_bonus_amount: 0.0
+
+  # Medium tier tasks
+  code:
+    base: 0.005
+    difficulty_bonus: 0.005
+    speed_bonus_threshold: 10.0
+    speed_bonus_amount: 0.001
+
+  humaneval:
+    base: 0.005
+    difficulty_bonus: 0.005
+    speed_bonus_threshold: 10.0
+    speed_bonus_amount: 0.001
+
+  mbpp:
+    base: 0.005
+    difficulty_bonus: 0.005
+    speed_bonus_threshold: 10.0
+    speed_bonus_amount: 0.001
+
+  # Hard tier tasks
+  humaneval_pro:
+    base: 0.015
+    difficulty_bonus: 0.010
+    speed_bonus_threshold: 30.0
+    speed_bonus_amount: 0.002
+
+  mbpp_pro:
+    base: 0.015
+    difficulty_bonus: 0.010
+    speed_bonus_threshold: 30.0
+    speed_bonus_amount: 0.002
+
+  algorithm:
+    base: 0.020
+    difficulty_bonus: 0.015
+    speed_bonus_threshold: 30.0
+    speed_bonus_amount: 0.003
+
+  # Expert tier tasks
+  swe_lite:
+    base: 0.050
+    difficulty_bonus: 0.030
+    speed_bonus_threshold: 60.0
+    speed_bonus_amount: 0.005
+
+  feature_impl:
+    base: 0.050
+    difficulty_bonus: 0.030
+    speed_bonus_threshold: 60.0
+    speed_bonus_amount: 0.005
+
+  # Tier multipliers (applied on top of base rewards)
+  tier_multipliers:
+    1: 1.0   # Simple
+    2: 1.5   # Medium
+    3: 2.5   # Hard
+    4: 5.0   # Expert
+
+# ============================================================
+# Sandbox Configuration
+# ============================================================
+sandbox:
+  # Maximum execution time for code tasks
+  timeout_seconds: 5.0
+
+  # Maximum memory usage (MB)
+  max_memory_mb: 128
+
+  # Allowed imports (empty = all allowed)
+  allowed_imports: []
+
+# ============================================================
+# Display Fitness Weights
+# ============================================================
+# These weights are for the display fitness calculation only.
+# Real fitness emerges from survival and reproduction.
+display_fitness:
+  survival_weight: 0.20
+  economic_roi_weight: 0.30
+  task_success_weight: 0.20
+  offspring_survival_weight: 0.30
+
+# ============================================================
+# Genome Bounds
+# ============================================================
+# Bounds for mutable genome parameters during evolution
+genome_bounds:
+  # Strategy bounds
+  task_preference_range: [0.1, 1.0]
+  risk_tolerance_range: [0.0, 1.0]
+  difficulty_preference_range: [0.0, 1.0]
+
+  # Economic bounds
+  budget_per_cycle_range: [0.01, 0.20]
+  savings_rate_range: [0.0, 0.5]
+  replication_threshold_range: [0.03, 0.20]
+  child_inheritance_ratio_range: [0.2, 0.6]
+
+  # Model bounds
+  model_preference_tier_range: [1, 4]
+  fallback_aggressiveness_range: [0.0, 1.0]
+
+  # Timing bounds
+  cycle_interval_range: [10.0, 120.0]
+  task_timeout_multiplier_range: [0.5, 2.0]
+
+  # Meta bounds
+  mutation_rate_range: [0.01, 0.30]
+  mutation_magnitude_range: [0.02, 0.25]
+
+# ============================================================
+# Presets
+# ============================================================
+presets:
+  # Default balanced selection
+  default:
+    economy:
+      existence_cost_per_cycle: 0.0001
+      minimum_viable_balance: 0.001
+    selection:
+      starvation_threshold: 20
+      enable_culling: false
+
+  # Harsh selection - faster evolution, more deaths
+  harsh:
+    economy:
+      existence_cost_per_cycle: 0.0002
+      minimum_viable_balance: 0.005
+    selection:
+      starvation_threshold: 10
+      enable_culling: true
+      culling_interval_cycles: 50
+      culling_bottom_percentile: 0.15
+
+  # Gentle selection - slower evolution, more survival
+  gentle:
+    economy:
+      existence_cost_per_cycle: 0.00005
+      minimum_viable_balance: 0.0001
+    selection:
+      starvation_threshold: 50
+      enable_culling: false
+
+# ============================================================
+# OpenClaw Bot Settings (higher costs, higher rewards)
+# ============================================================
+openclaw:
+  economy:
+    # 10x existence cost (running full agent)
+    existence_cost_per_cycle: 0.001
+
+    # Higher minimum balance
+    minimum_viable_balance: 0.01
+
+    # Higher seed funding
+    seed_funding: 0.50
+
+    # Higher replication cost
+    replication_cost: 0.10
+
+  selection:
+    # Fewer failures allowed
+    starvation_threshold: 10
+    enable_culling: false
+
+  rewards:
+    # Higher base rewards for real tasks
+    code_generation:
+      base: 0.02
+      difficulty_bonus: 0.02
+      speed_bonus_amount: 0.005
+
+    bug_fix:
+      base: 0.03
+      difficulty_bonus: 0.02
+      speed_bonus_amount: 0.005
+
+    file_organization:
+      base: 0.01
+      difficulty_bonus: 0.01
+
+    data_extraction:
+      base: 0.015
+      difficulty_bonus: 0.015
+
+    script_creation:
+      base: 0.025
+      difficulty_bonus: 0.02
+      speed_bonus_amount: 0.005
+
+    math_problem:
+      base: 0.01
+      difficulty_bonus: 0.01
+
+  # Task tiers for OpenClaw
+  task_tiers:
+    simple:
+      types:
+        - math_problem
+        - file_organization
+      difficulty_range: [0.0, 0.3]
+      sampling_weight: 1.0
+
+    medium:
+      types:
+        - code_generation
+        - data_extraction
+        - script_creation
+      difficulty_range: [0.3, 0.6]
+      sampling_weight: 1.0
+
+    hard:
+      types:
+        - bug_fix
+        - refactoring
+        - algorithm
+      difficulty_range: [0.6, 0.85]
+      sampling_weight: 0.5
+
+    expert:
+      types:
+        - code_review
+        - log_analysis
+      difficulty_range: [0.85, 1.0]
+      sampling_weight: 0.2

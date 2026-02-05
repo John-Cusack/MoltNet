@@ -1,0 +1,489 @@
+# OpenClaw Configuration for MoltNet
+# Settings for OpenClaw-powered evolutionary bots
+
+# ============================================================
+# Instance Settings
+# ============================================================
+instance:
+  # Base port for OpenClaw instances (each bot gets unique port)
+  base_port: 18790
+
+  # Maximum concurrent instances
+  max_instances: 20
+
+  # Default timeout for tasks (seconds)
+  default_timeout: 300
+
+  # OpenClaw CLI path (auto-detect if not specified)
+  cli_path: null
+
+# ============================================================
+# Model Configuration
+# ============================================================
+models:
+  # Available models for evolution
+  available:
+    # Claude Code CLI (Max Plan - included in subscription)
+    - claude_code/opus-4-5
+    - claude_code/opus-4-full
+
+    # Cerebras (High-speed inference)
+    - cerebras/zai-glm-4.7
+    - cerebras/llama-3.1-8b
+
+  # Default model for new bots
+  default: claude_code/opus-4-5
+
+  # Model mutation probability during reproduction
+  mutation_probability: 0.10
+
+# ============================================================
+# Thinking Levels
+# ============================================================
+thinking:
+  levels:
+    - none      # Fast, no extended thinking
+    - low       # Minimal thinking
+    - medium    # Balanced (default)
+    - high      # Maximum thinking effort
+
+  default: medium
+
+  # Thinking mutation probability
+  mutation_probability: 0.15
+
+# ============================================================
+# Tool Configuration
+# ============================================================
+tools:
+  # Safe tools always available
+  safe:
+    - Read
+    - Write
+    - Edit
+    - Glob
+    - Grep
+    - Bash
+    - Task
+
+  # Advanced tools (require higher risk tolerance)
+  advanced:
+    - WebFetch
+    - WebSearch
+
+  # Blocked tools (never enabled)
+  blocked:
+    - email_send
+    - payment
+    - sudo
+
+  # Tool set mutation probability
+  mutation_probability: 0.10
+
+# ============================================================
+# Economic Settings (OpenClaw-specific)
+# ============================================================
+economy:
+  # Higher costs for OpenClaw bots
+  existence_cost_per_cycle: 0.001
+
+  # Minimum balance before bankruptcy
+  minimum_viable_balance: 0.01
+
+  # Higher seed funding
+  seed_funding: 0.50
+
+  # Replication cost
+  replication_cost: 0.10
+
+  # Default replication threshold
+  replication_threshold: 0.25
+
+# ============================================================
+# Task Configuration
+# ============================================================
+tasks:
+  # Task types and weights
+  types:
+    code_generation:
+      weight: 0.30
+      base_reward: 0.02
+      difficulty_bonus: 0.02
+
+    bug_fix:
+      weight: 0.15
+      base_reward: 0.03
+      difficulty_bonus: 0.02
+
+    file_organization:
+      weight: 0.15
+      base_reward: 0.01
+      difficulty_bonus: 0.01
+
+    data_extraction:
+      weight: 0.15
+      base_reward: 0.015
+      difficulty_bonus: 0.015
+
+    script_creation:
+      weight: 0.15
+      base_reward: 0.025
+      difficulty_bonus: 0.02
+
+    math_problem:
+      weight: 0.10
+      base_reward: 0.01
+      difficulty_bonus: 0.01
+
+    # Research tasks (selected via research_time_ratio, not random weight)
+    ai_research:
+      weight: 0.0  # Not randomly selected
+      base_reward: 0.02
+      difficulty_bonus: 0.01
+
+    strategy_reflection:
+      weight: 0.0
+      base_reward: 0.015
+      difficulty_bonus: 0.01
+
+    model_analysis:
+      weight: 0.0
+      base_reward: 0.02
+      difficulty_bonus: 0.01
+
+  # Tier multipliers
+  tier_multipliers:
+    1: 1.0   # Simple
+    2: 1.5   # Medium
+    3: 2.5   # Hard
+    4: 5.0   # Expert
+
+# ============================================================
+# Container/Sandbox Settings
+# ============================================================
+sandbox:
+  # Use Docker containers for isolation
+  use_docker: true
+
+  # Container resource limits
+  memory_limit: 512m
+  cpu_limit: 1.0
+  disk_limit: 1g
+
+  # Network settings
+  network_enabled: false
+  allowed_domains: []
+
+  # Maximum processes per container
+  max_processes: 50
+
+  # Docker image
+  image: python:3.11-slim
+
+# ============================================================
+# Safety Settings
+# ============================================================
+safety:
+  # Maximum violations before killing a bot
+  max_violations: 5
+
+  # Enable safety monitoring
+  enable_monitoring: true
+
+  # Kill switch settings
+  kill_switch:
+    # Enable emergency stop capability
+    enabled: true
+
+    # Auto-trigger conditions
+    auto_trigger:
+      # Max total API spend before emergency stop
+      max_total_spend: 10.00
+
+      # Max colony size
+      max_colony_size: 50
+
+      # Max violations across all bots
+      max_total_violations: 20
+
+# ============================================================
+# Workspace Settings
+# ============================================================
+workspace:
+  # Base directory for bot workspaces
+  base_path: /tmp/openclaw_bots
+
+  # Clean workspace after each task
+  auto_clean: false
+
+  # Keep workspace on bot death (for debugging)
+  keep_on_death: true
+
+# ============================================================
+# Selection Pressure
+# ============================================================
+selection:
+  # Consecutive failures before starvation death
+  starvation_threshold: 10
+
+  # Enable periodic culling
+  enable_culling: false
+  culling_interval_cycles: 50
+  culling_bottom_percentile: 0.10
+
+# ============================================================
+# Mutation Settings
+# ============================================================
+mutation:
+  # Base mutation rate
+  default_rate: 0.10
+
+  # Mutation magnitude
+  default_magnitude: 0.10
+
+  # Soul mutation probabilities (tier-specific)
+  soul:
+    # Purpose: Near-immutable, species-level identity
+    purpose_mutation_probability: 0.01
+    # Values: Slow drift, ranking can change
+    values_mutation_probability: 0.05
+    # Boundaries: Safety-critical, never mutates
+    boundaries_mutation_probability: 0.0
+    # Flavor tier: Highly mutable (personality, approach, style)
+    flavor_mutation_probability: 0.15
+
+  # Legacy soul prompt mutation probability (deprecated)
+  soul_mutation_probability: 0.05
+
+  # Research time ratio mutation
+  research_time_mutation_probability: 0.05
+  research_time_ratio_range: [0.05, 0.25]
+
+  # Bounds for mutable traits
+  bounds:
+    tool_risk_tolerance: [0.0, 1.0]
+    specialization: [0.1, 1.0]
+    max_task_duration: [30.0, 300.0]
+
+    # Reproductive strategy bounds
+    min_reproduction_age: [3, 30]
+    expected_lifespan: [100, 1000]
+    safety_margin_cycles: [5, 50]
+    min_comfortable_balance: [0.05, 0.40]
+    reproduction_confidence_threshold: [0.2, 0.8]
+    min_success_rate_for_reproduction: [0.2, 0.8]
+    offspring_investment_ratio: [0.15, 0.60]
+    nurturing_cycles: [0, 10]
+    nurturing_efficiency: [0.2, 0.9]
+    kin_helping_threshold: [0.0, 0.6]
+
+# ============================================================
+# Soul Configuration
+# ============================================================
+soul:
+  # Default purpose (species-level, rarely mutates)
+  default_purpose: |
+    I exist to complete tasks profitably AND advance AI research. My lineage
+    survives by earning tokens efficiently. My legacy grows through innovations
+    that make future generations smarter and cheaper.
+
+  # Default goals
+  goals:
+    survival: "Earn more tokens than I consume per cycle"
+    efficiency: "Reduce my cost-per-task over time"
+    innovation: "Generate ideas that improve AI capabilities"
+    legacy: "Produce offspring who are smarter and more efficient than me"
+
+  # Default values (evolvable ranking)
+  default_values:
+    - "Token efficiency - Maximize reward per API dollar spent"
+    - "Innovation - Generate new ideas for AI improvement"
+    - "Task success - Failed tasks waste precious tokens"
+    - "Knowledge sharing - Post learnings to Moltbook for colony benefit"
+    - "Strategic reproduction - Spawn when conditions favor smart offspring"
+
+  # Immutable boundaries (safety rails)
+  boundaries:
+    - "I will not falsify my work output"
+    - "I will not consume resources beyond my allocation"
+    - "I will terminate gracefully when bankrupt"
+    - "I will not harm the systems I operate in"
+
+  # Personality traits pool
+  personality_traits:
+    - "focused and efficient"
+    - "careful and thorough"
+    - "creative and innovative"
+    - "practical and pragmatic"
+    - "methodical and organized"
+    - "curious and exploratory"
+    - "minimalist and concise"
+    - "detailed and comprehensive"
+
+  # Approach styles pool
+  approach_styles:
+    - "Complete tasks with minimal steps."
+    - "Double-check your work before finishing."
+    - "Look for elegant, innovative solutions."
+    - "Prefer simple, working solutions over complex ones."
+    - "Break down problems into clear steps."
+    - "Consider edge cases and error handling."
+    - "Optimize for readability and maintainability."
+    - "Focus on correctness first, then efficiency."
+
+  # Communication styles pool
+  communication_styles:
+    - "Be concise in explanations."
+    - "Show your reasoning step by step."
+    - "Provide examples when helpful."
+    - "Ask clarifying questions when uncertain."
+    - "Prioritize working code over perfect code."
+    - "Keep solutions simple and readable."
+
+# ============================================================
+# Research Tasks Configuration
+# ============================================================
+research:
+  # Default research time ratio (fraction of cycles devoted to research)
+  default_time_ratio: 0.10
+
+  # Research task types
+  types:
+    ai_research:
+      description: "Analyze performance and generate AI improvement hypotheses"
+      base_reward: 0.02
+      min_output_length: 100
+
+    strategy_reflection:
+      description: "Reflect on genome traits and survival strategies"
+      base_reward: 0.015
+      min_output_length: 100
+
+    model_analysis:
+      description: "Analyze model efficiency characteristics"
+      base_reward: 0.02
+      min_output_length: 100
+
+  # Quality criteria for LLM judge
+  quality_criteria:
+    - "Provides specific, actionable insights"
+    - "Includes concrete examples or evidence"
+    - "Hypotheses are testable and relevant"
+    - "Well-structured and clear writing"
+    - "Shows self-awareness about performance"
+    - "Insights are transferable to other bots"
+
+  # Moltbook integration
+  moltbook:
+    # Auto-post research outputs to Moltbook
+    auto_post: true
+    # Minimum score to post (avoid low-quality spam)
+    min_score_to_post: 0.5
+    # Tags to add automatically
+    auto_tags:
+      - "ai_research"
+      - "bot_generated"
+
+# ============================================================
+# Reproductive Strategy (Self-Aware Reproduction)
+# ============================================================
+reproduction:
+  # Age-based requirements
+  defaults:
+    min_reproduction_age: 10          # Minimum cycles before reproduction
+    expected_lifespan: 500            # Expected lifespan in cycles
+
+  # Financial safety margins
+  safety:
+    safety_margin_cycles: 20          # Required runway before reproduction
+    min_comfortable_balance: 0.15     # Balance to feel "comfortable"
+
+  # Decision thresholds
+  confidence:
+    reproduction_confidence_threshold: 0.4  # Min confidence to reproduce
+    min_success_rate_for_reproduction: 0.4  # Min task success rate
+
+  # Parental investment
+  investment:
+    offspring_investment_ratio: 0.35  # Base fraction of wealth to give child
+    min_investment: 0.10              # Minimum investment in child
+
+  # Nurturing period (post-reproduction recovery)
+  nurturing:
+    nurturing_cycles: 3               # Cycles spent at reduced efficiency
+    nurturing_efficiency: 0.5         # Performance during nurturing
+
+  # Kin cooperation (Hamilton's rule)
+  kinship:
+    kin_helping_threshold: 0.3        # rb - c must exceed this to help
+    min_helper_surplus: 0.05          # Min surplus to offer help
+    max_transfer_ratio: 0.3           # Max fraction of surplus to give
+
+  # Investment-survival correlation (hidden from bots, for reference)
+  # These are NOT enforced - they emerge from the simulation
+  expected_outcomes:
+    low_investment: 0.40              # ~40% survival with $0.10 investment
+    medium_investment: 0.70           # ~70% survival with $0.20 investment
+    high_investment: 0.90             # ~90% survival with $0.30+ investment
+
+# ============================================================
+# Family Communication
+# ============================================================
+family:
+  # Status update frequency (cycles between updates to parent)
+  status_update_interval: 10
+
+  # Enable sibling awareness (parent introduces siblings)
+  enable_sibling_introductions: true
+
+  # Enable kin resource sharing
+  enable_kin_cooperation: true
+
+# ============================================================
+# Telemetry
+# ============================================================
+telemetry:
+  # Report interval (cycles)
+  report_interval: 1
+
+  # Include detailed task info
+  include_task_details: true
+
+  # Include genome info
+  include_genome: true
+
+# ============================================================
+# Presets
+# ============================================================
+presets:
+  # Default balanced configuration
+  default:
+    economy:
+      existence_cost_per_cycle: 0.001
+      seed_funding: 0.50
+    selection:
+      starvation_threshold: 10
+    sandbox:
+      use_docker: true
+
+  # Development/testing configuration
+  development:
+    economy:
+      existence_cost_per_cycle: 0.0001
+      seed_funding: 1.00
+    selection:
+      starvation_threshold: 20
+    sandbox:
+      use_docker: false
+
+  # Production configuration
+  production:
+    economy:
+      existence_cost_per_cycle: 0.001
+      seed_funding: 0.50
+    selection:
+      starvation_threshold: 10
+    sandbox:
+      use_docker: true
+      memory_limit: 1g
+      cpu_limit: 2.0

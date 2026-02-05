@@ -5,9 +5,14 @@ let config = {
     pollIntervalMs: 5000,
 };
 
+// Current time range (in seconds)
+let currentTimeRange = 3600; // Default: 1 hour
+
 // Charts
 let fitnessChart = null;
 let walletChart = null;
+let revenueChart = null;
+let apiSpendChart = null;
 
 // State
 let isConnected = false;
@@ -16,6 +21,7 @@ let lastUpdate = null;
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
     await loadConfig();
+    initTimeRangePicker();
     initCharts();
     await refreshAll();
     startPolling();
@@ -35,6 +41,29 @@ async function loadConfig() {
     }
 }
 
+// Initialize time range picker
+function initTimeRangePicker() {
+    const picker = document.getElementById('time-range');
+    picker.addEventListener('change', async (e) => {
+        currentTimeRange = parseInt(e.target.value);
+        await refreshAll();
+    });
+}
+
+// Calculate bucket size based on time range
+function getBucketSeconds(timeRange) {
+    // Adaptive bucketing for longer time ranges
+    if (timeRange <= 3600) {
+        return 60;        // 1 minute buckets for <= 1 hour
+    } else if (timeRange <= 21600) {
+        return 300;       // 5 minute buckets for <= 6 hours
+    } else if (timeRange <= 86400) {
+        return 900;       // 15 minute buckets for <= 24 hours
+    } else {
+        return 3600;      // 1 hour buckets for > 24 hours
+    }
+}
+
 // Initialize Chart.js charts
 function initCharts() {
     const chartOptions = {
@@ -48,7 +77,7 @@ function initCharts() {
             x: {
                 type: 'category',
                 grid: { color: 'rgba(48, 54, 61, 0.5)' },
-                ticks: { color: '#8b949e', maxRotation: 0 },
+                ticks: { color: '#8b949e', maxRotation: 0, maxTicksLimit: 10 },
             },
             y: {
                 grid: { color: 'rgba(48, 54, 61, 0.5)' },
@@ -102,6 +131,40 @@ function initCharts() {
         },
         options: chartOptions,
     });
+
+    // Revenue chart
+    const revenueCtx = document.getElementById('revenue-chart').getContext('2d');
+    revenueChart = new Chart(revenueCtx, {
+        type: 'bar',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Revenue',
+                data: [],
+                backgroundColor: 'rgba(63, 185, 80, 0.6)',
+                borderColor: '#3fb950',
+                borderWidth: 1,
+            }],
+        },
+        options: chartOptions,
+    });
+
+    // API Spend chart
+    const apiSpendCtx = document.getElementById('api-spend-chart').getContext('2d');
+    apiSpendChart = new Chart(apiSpendCtx, {
+        type: 'bar',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'API Spend',
+                data: [],
+                backgroundColor: 'rgba(248, 81, 73, 0.6)',
+                borderColor: '#f85149',
+                borderWidth: 1,
+            }],
+        },
+        options: chartOptions,
+    });
 }
 
 // Start polling for updates
@@ -151,7 +214,7 @@ function updateLastUpdate() {
 
 // Refresh colony stats
 async function refreshStats() {
-    const response = await fetch('/api/colony/stats');
+    const response = await fetch(`/api/colony/stats?since_seconds=${currentTimeRange}`);
     if (!response.ok) throw new Error('Failed to fetch stats');
 
     const stats = await response.json();
@@ -168,18 +231,34 @@ async function refreshStats() {
 
 // Refresh charts
 async function refreshCharts() {
-    // Fetch fitness time series
-    const fitnessResponse = await fetch('/api/timeseries/fitness_score?since_seconds=3600&bucket_seconds=60');
+    const bucketSeconds = getBucketSeconds(currentTimeRange);
+
+    // Fetch all time series in parallel
+    const [fitnessResponse, walletResponse, revenueResponse, apiSpendResponse] = await Promise.all([
+        fetch(`/api/timeseries/fitness_score?since_seconds=${currentTimeRange}&bucket_seconds=${bucketSeconds}`),
+        fetch(`/api/timeseries/wallet_balance?since_seconds=${currentTimeRange}&bucket_seconds=${bucketSeconds}`),
+        fetch(`/api/timeseries/cycle_revenue?since_seconds=${currentTimeRange}&bucket_seconds=${bucketSeconds}`),
+        fetch(`/api/timeseries/cycle_api_spend?since_seconds=${currentTimeRange}&bucket_seconds=${bucketSeconds}`),
+    ]);
+
     if (fitnessResponse.ok) {
         const data = await fitnessResponse.json();
         updateChart(fitnessChart, data.points);
     }
 
-    // Fetch wallet time series
-    const walletResponse = await fetch('/api/timeseries/wallet_balance?since_seconds=3600&bucket_seconds=60');
     if (walletResponse.ok) {
         const data = await walletResponse.json();
         updateChart(walletChart, data.points);
+    }
+
+    if (revenueResponse.ok) {
+        const data = await revenueResponse.json();
+        updateChart(revenueChart, data.points);
+    }
+
+    if (apiSpendResponse.ok) {
+        const data = await apiSpendResponse.json();
+        updateChart(apiSpendChart, data.points);
     }
 }
 
@@ -187,7 +266,17 @@ async function refreshCharts() {
 function updateChart(chart, points) {
     const labels = points.map(p => {
         const date = new Date(p.timestamp);
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        // Format based on time range
+        if (currentTimeRange <= 21600) {
+            // For <= 6 hours, show time only
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } else if (currentTimeRange <= 86400) {
+            // For <= 24 hours, show date and time
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } else {
+            // For > 24 hours, show date
+            return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        }
     });
 
     const values = points.map(p => p.value);
@@ -289,8 +378,10 @@ function formatState(state) {
         'idle': 'state-idle',
         'waiting': 'state-idle',
         'replicating': 'state-replicating',
+        'nurturing': 'state-nurturing',
         'error': 'state-error',
         'failed': 'state-error',
+        'dead': 'state-error',
     }[state.toLowerCase()] || 'state-idle';
 
     return `<span class="state-badge ${stateClass}">${state}</span>`;
@@ -299,8 +390,9 @@ function formatState(state) {
 // Get event type CSS class
 function getEventTypeClass(eventType) {
     if (eventType.includes('replicat')) return 'replication';
-    if (eventType.includes('error') || eventType.includes('fail')) return 'error';
+    if (eventType.includes('error') || eventType.includes('fail') || eventType.includes('died')) return 'error';
     if (eventType.includes('task') || eventType.includes('complete')) return 'task';
+    if (eventType.includes('started')) return 'started';
     return '';
 }
 
@@ -313,6 +405,8 @@ function formatEventData(data) {
     if (data.message) return data.message;
     if (data.error) return data.error;
     if (data.task) return `Task: ${data.task}`;
+    if (data.cause) return `Cause: ${data.cause}`;
+    if (data.child_name) return `Child: ${data.child_name}`;
 
     // Fallback to JSON
     return JSON.stringify(data);

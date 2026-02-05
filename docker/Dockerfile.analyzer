@@ -1,0 +1,42 @@
+# Dockerfile for MoltNet Analyzer service
+FROM python:3.12-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for faster package management
+RUN pip install uv
+
+# Create app directory
+WORKDIR /app
+
+# Copy dependency files
+COPY pyproject.toml ./
+COPY uv.lock ./
+
+# Install dependencies
+RUN uv sync --frozen --no-dev
+
+# Copy application code
+COPY analyzer/ ./analyzer/
+
+# Create data directory
+RUN mkdir -p /data/runs /data/archives
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV ANALYZER_DATA_DIR=/data
+ENV ANALYZER_HOST=0.0.0.0
+ENV ANALYZER_PORT=9102
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:9102/health || exit 1
+
+# Expose port
+EXPOSE 9102
+
+# Run the analyzer service
+CMD ["uv", "run", "uvicorn", "analyzer.main:app", "--host", "0.0.0.0", "--port", "9102"]

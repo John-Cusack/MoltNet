@@ -1,4 +1,7 @@
-"""Telemetry Reporter - Fire-and-forget telemetry with circuit breaker."""
+"""Telemetry Reporter - Fire-and-forget telemetry with circuit breaker.
+
+Supports both HTTP telemetry to Observatory and file-based fallback logging.
+"""
 
 from __future__ import annotations
 
@@ -6,9 +9,13 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from pathlib import Path
+from typing import Any, TYPE_CHECKING
 
 import httpx
+
+if TYPE_CHECKING:
+    from clawdbot.logging import BotFileLogger
 
 
 @dataclass
@@ -35,12 +42,16 @@ class TelemetryReporter:
 
     This reporter is designed to never block or raise exceptions to the caller.
     All telemetry is sent asynchronously with graceful degradation on failure.
+
+    Supports file-based fallback logging when HTTP telemetry fails or when
+    a file logger is explicitly attached.
     """
 
     def __init__(
         self,
         observatory_url: str | None = None,
         config: TelemetryConfig | None = None,
+        file_logger: "BotFileLogger | None" = None,
     ):
         self.observatory_url = observatory_url.rstrip("/") if observatory_url else None
         self.config = config or TelemetryConfig()
@@ -49,6 +60,11 @@ class TelemetryReporter:
         self._pending_tasks: set[asyncio.Task] = set()
         self._queue: list[dict[str, Any]] = []
         self._enabled = bool(self.observatory_url)
+        self._file_logger = file_logger
+
+    def set_file_logger(self, file_logger: "BotFileLogger") -> None:
+        """Attach a file logger for fallback/persistent logging."""
+        self._file_logger = file_logger
 
     @property
     def is_enabled(self) -> bool:
@@ -93,8 +109,11 @@ class TelemetryReporter:
         """Send a payload to the observatory.
 
         Returns True on success, False on failure.
+        On failure, falls back to file logging if available.
         """
         if not self._enabled or self.is_circuit_open:
+            # Fall back to file logging
+            self._log_to_file(endpoint, payload)
             return False
 
         try:
@@ -108,16 +127,54 @@ class TelemetryReporter:
                 return True
             else:
                 self._record_failure()
+                # Fall back to file logging on HTTP error
+                self._log_to_file(endpoint, payload)
                 return False
         except Exception:
             self._record_failure()
+            # Fall back to file logging on exception
+            self._log_to_file(endpoint, payload)
             return False
+
+    def _log_to_file(self, endpoint: str, payload: dict[str, Any]) -> None:
+        """Log payload to file as fallback."""
+        if self._file_logger is None:
+            return
+
+        try:
+            if endpoint == "telemetry":
+                self._file_logger.log_telemetry(
+                    generation=payload.get("generation"),
+                    fitness_score=payload.get("fitness_score"),
+                    wallet_balance=payload.get("wallet_balance"),
+                    cycle_count=payload.get("cycle_count"),
+                    state=payload.get("state"),
+                    brain_primary=payload.get("brain_primary"),
+                    cycle_revenue=payload.get("cycle_revenue"),
+                    cycle_api_spend=payload.get("cycle_api_spend"),
+                    tasks_completed=payload.get("tasks_completed"),
+                    tasks_failed=payload.get("tasks_failed"),
+                    genome_hash=payload.get("genome_hash"),
+                    parent_name=payload.get("parent_name"),
+                    extra=payload.get("extra"),
+                )
+            elif endpoint == "events":
+                self._file_logger.log_event(
+                    event_type=payload.get("event_type", "unknown"),
+                    data=payload.get("data"),
+                )
+        except Exception:
+            pass  # File logging is best-effort
 
     def _fire_and_forget(self, endpoint: str, payload: dict[str, Any]) -> None:
         """Send a request without waiting for response.
 
         This creates a background task and tracks it for cleanup.
+        Also logs to file for persistence (if file logger attached).
         """
+        # Always log to file for persistence (independent of HTTP)
+        self._log_to_file(endpoint, payload)
+
         if not self._enabled:
             return
 
@@ -239,10 +296,14 @@ class TelemetryReporter:
 
     def get_stats(self) -> dict[str, Any]:
         """Get telemetry reporter statistics."""
-        return {
+        stats = {
             "enabled": self._enabled,
             "circuit_open": self.is_circuit_open,
             "failure_count": self._circuit.failures,
             "pending_tasks": len(self._pending_tasks),
             "queue_size": len(self._queue),
+            "file_logger_attached": self._file_logger is not None,
         }
+        if self._file_logger:
+            stats["file_logger"] = self._file_logger.get_stats()
+        return stats

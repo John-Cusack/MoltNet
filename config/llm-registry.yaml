@@ -353,7 +353,7 @@ models:
   # ============================================================
   # Zhipu (GLM) - Chinese market
   # ============================================================
-  zhipu/glm-4-plus:
+  cerebras/zai-glm-4.7:
     display_name: "GLM-4 Plus"
     provider: zhipu
     model_id: "glm-4-plus"
@@ -391,10 +391,10 @@ models:
   # ============================================================
   # Claude Code CLI - Max Plan (pay per subscription, not token)
   # ============================================================
-  claude_code/sonnet-4-5:
-    display_name: "Claude Sonnet 4.5 (Max Plan)"
+  claude_code/opus-4-5:
+    display_name: "Claude Opus 4.5 (Max Plan)"
     provider: claude_code
-    model_id: "claude-sonnet-4-5-20250514"
+    model_id: "opus"
     context_window: 200000
     max_output_tokens: 16384
     cost_per_1k_input: 0.0  # Covered by Max subscription
@@ -407,12 +407,12 @@ models:
       - instruction_following
     weaknesses:
       - latency  # CLI has subprocess overhead
-    notes: "Claude via Max subscription. No per-token cost, higher latency."
+    notes: "Claude Opus 4.5 via Max subscription. No per-token cost, higher latency."
 
-  claude_code/opus-4:
-    display_name: "Claude Opus 4 (Max Plan)"
+  claude_code/opus-4-full:
+    display_name: "Claude Opus 4.5 Full ID (Max Plan)"
     provider: claude_code
-    model_id: "claude-opus-4-20250514"
+    model_id: "claude-opus-4-5-20251101"
     context_window: 200000
     max_output_tokens: 32000
     cost_per_1k_input: 0.0
@@ -431,23 +431,24 @@ models:
   # ============================================================
   # Cerebras - Ultra-fast inference
   # ============================================================
-  cerebras/llama-3.3-70b:
-    display_name: "Llama 3.3 70B (Cerebras)"
+  cerebras/zai-glm-4.7:
+    display_name: "Z.ai GLM-4.7 (Cerebras)"
     provider: cerebras
-    model_id: "llama-3.3-70b"
-    context_window: 8192
+    model_id: "zai-glm-4.7"
+    context_window: 131072
     max_output_tokens: 8192
     cost_per_1k_input: 0.0  # Varies by plan
     cost_per_1k_output: 0.0  # Varies by plan
     quality_tier: 4
     strengths:
       - speed
-      - general
-      - code
       - reasoning
+      - code
+      - chinese
+      - general
     weaknesses:
-      - context_window
-    notes: "Extremely fast inference on Cerebras hardware."
+      - cost
+    notes: "Z.ai GLM-4.7 on Cerebras hardware. Frontier model at 1000+ tokens/sec."
 
   cerebras/llama-3.1-8b:
     display_name: "Llama 3.1 8B (Cerebras)"
@@ -500,7 +501,7 @@ task_routing:
     free: ["ollama/phi4-mini", "ollama/llama3.2"]
 
   chinese:
-    best: ["zhipu/glm-4-plus", "deepseek/deepseek-chat"]
+    best: ["cerebras/zai-glm-4.7", "deepseek/deepseek-chat"]
     budget: ["zhipu/glm-4-flash", "deepseek/deepseek-chat"]
     free: ["ollama/qwen2.5-coder"]
 

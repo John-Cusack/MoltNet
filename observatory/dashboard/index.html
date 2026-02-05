@@ -10,9 +10,20 @@
 <body>
     <header>
         <h1>MoltNet Observatory</h1>
-        <div class="header-status">
-            <span id="connection-status" class="status-indicator">Connecting...</span>
-            <span id="last-update"></span>
+        <div class="header-controls">
+            <div class="time-range-picker">
+                <label for="time-range">Time Range:</label>
+                <select id="time-range">
+                    <option value="3600">1 Hour</option>
+                    <option value="21600">6 Hours</option>
+                    <option value="86400">24 Hours</option>
+                    <option value="604800">7 Days</option>
+                </select>
+            </div>
+            <div class="header-status">
+                <span id="connection-status" class="status-indicator">Connecting...</span>
+                <span id="last-update"></span>
+            </div>
         </div>
     </header>
 
@@ -32,16 +43,16 @@
             <div class="stat-card">
                 <h3>Total Revenue</h3>
                 <div class="stat-value" id="stat-revenue">-</div>
-                <div class="stat-label">this hour</div>
+                <div class="stat-label">in selected period</div>
             </div>
             <div class="stat-card">
                 <h3>API Spend</h3>
                 <div class="stat-value" id="stat-api-spend">-</div>
-                <div class="stat-label">this hour</div>
+                <div class="stat-label">in selected period</div>
             </div>
         </section>
 
-        <!-- Charts Row -->
+        <!-- Charts Row 1: Fitness and Wallet -->
         <section class="charts-row">
             <div class="chart-card">
                 <h3>Colony Fitness Over Time</h3>
@@ -50,6 +61,18 @@
             <div class="chart-card">
                 <h3>Wallet Balance</h3>
                 <canvas id="wallet-chart"></canvas>
+            </div>
+        </section>
+
+        <!-- Charts Row 2: Revenue and API Spend -->
+        <section class="charts-row">
+            <div class="chart-card">
+                <h3>Revenue Over Time</h3>
+                <canvas id="revenue-chart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>API Spend Over Time</h3>
+                <canvas id="api-spend-chart"></canvas>
             </div>
         </section>
 

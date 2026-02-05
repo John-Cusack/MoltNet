@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoltNet Analyzer</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <!-- Chart.js for metrics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- D3.js for family tree -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <h1>MoltNet Analyzer</h1>
+            <nav class="nav">
+                <button class="nav-btn active" data-view="timeline">Timeline</button>
+                <button class="nav-btn" data-view="family-tree">Family Tree</button>
+                <button class="nav-btn" data-view="metrics">Metrics</button>
+                <button class="nav-btn" data-view="conversations">Conversations</button>
+                <button class="nav-btn" data-view="reflections">Reflections</button>
+            </nav>
+            <div class="run-selector">
+                <label for="run-select">Run:</label>
+                <select id="run-select">
+                    <option value="">Select a run...</option>
+                </select>
+            </div>
+        </header>
+
+        <main class="main">
+            <!-- Timeline View -->
+            <section id="timeline-view" class="view active">
+                <div class="view-header">
+                    <h2>Bot Lifecycle Timeline</h2>
+                    <p class="view-desc">Gantt chart showing bot lifespans with birth, reproduction, and death events.</p>
+                </div>
+                <div class="timeline-container">
+                    <div id="timeline-chart" class="chart-container"></div>
+                </div>
+                <div class="timeline-legend">
+                    <span class="legend-item"><span class="dot claude"></span> Claude</span>
+                    <span class="legend-item"><span class="dot cerebras"></span> Cerebras/GLM</span>
+                    <span class="legend-item"><span class="dot other"></span> Other</span>
+                </div>
+            </section>
+
+            <!-- Family Tree View -->
+            <section id="family-tree-view" class="view">
+                <div class="view-header">
+                    <h2>Family Tree</h2>
+                    <p class="view-desc">Genealogy visualization showing parent-child relationships.</p>
+                </div>
+                <div class="tree-controls">
+                    <button id="tree-reset">Reset View</button>
+                    <label>
+                        <input type="checkbox" id="tree-show-dead" checked>
+                        Show dead bots
+                    </label>
+                </div>
+                <div id="family-tree-chart" class="chart-container tree-chart"></div>
+            </section>
+
+            <!-- Metrics View -->
+            <section id="metrics-view" class="view">
+                <div class="view-header">
+                    <h2>Metrics Dashboard</h2>
+                    <p class="view-desc">Compare model performance, economics, and task success rates.</p>
+                </div>
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <h3>Model Comparison</h3>
+                        <canvas id="model-chart"></canvas>
+                    </div>
+                    <div class="metric-card">
+                        <h3>Interaction Types</h3>
+                        <canvas id="interaction-chart"></canvas>
+                    </div>
+                    <div class="metric-card">
+                        <h3>Conversation Stats</h3>
+                        <div id="conv-stats" class="stats-display"></div>
+                    </div>
+                    <div class="metric-card wide">
+                        <h3>Model Performance</h3>
+                        <table id="model-table" class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Model</th>
+                                    <th>Bots</th>
+                                    <th>Avg Lifespan</th>
+                                    <th>Avg Success</th>
+                                    <th>Offspring Survival</th>
+                                    <th>Total Cost</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Conversations View -->
+            <section id="conversations-view" class="view">
+                <div class="view-header">
+                    <h2>Conversation Explorer</h2>
+                    <p class="view-desc">Search and browse all LLM conversations.</p>
+                </div>
+                <div class="search-bar">
+                    <input type="text" id="conv-search" placeholder="Search conversations...">
+                    <button id="conv-search-btn">Search</button>
+                    <select id="conv-type-filter">
+                        <option value="">All types</option>
+                        <option value="task_execution">Task Execution</option>
+                        <option value="reflection_periodic">Periodic Reflection</option>
+                        <option value="reflection_milestone">Milestone Reflection</option>
+                        <option value="reflection_death">Death Reflection</option>
+                        <option value="reflection_pre_reproduction">Pre-Reproduction</option>
+                        <option value="reflection_post_failure">Post-Failure</option>
+                        <option value="moltbook_query">Moltbook Query</option>
+                    </select>
+                    <select id="conv-model-filter">
+                        <option value="">All models</option>
+                        <option value="opus">Opus</option>
+                        <option value="sonnet">Sonnet</option>
+                        <option value="glm">GLM</option>
+                        <option value="cerebras">Cerebras</option>
+                    </select>
+                </div>
+                <div id="conversations-list" class="conversations-list"></div>
+                <div class="pagination">
+                    <button id="conv-prev" disabled>Previous</button>
+                    <span id="conv-page">Page 1</span>
+                    <button id="conv-next">Next</button>
+                </div>
+            </section>
+
+            <!-- Reflections View -->
+            <section id="reflections-view" class="view">
+                <div class="view-header">
+                    <h2>Bot Reflections</h2>
+                    <p class="view-desc">What bots thought about when not doing tasks.</p>
+                </div>
+                <div class="reflection-filters">
+                    <button class="filter-btn active" data-type="">All</button>
+                    <button class="filter-btn" data-type="periodic">Periodic</button>
+                    <button class="filter-btn" data-type="milestone">Milestones</button>
+                    <button class="filter-btn" data-type="death">Final Thoughts</button>
+                    <button class="filter-btn" data-type="pre_reproduction">Pre-Reproduction</button>
+                    <button class="filter-btn" data-type="post_failure">Post-Failure</button>
+                </div>
+                <div id="reflections-list" class="reflections-list"></div>
+            </section>
+        </main>
+
+        <!-- Conversation Detail Modal -->
+        <div id="conv-modal" class="modal">
+            <div class="modal-content">
+                <span class="close-btn">&times;</span>
+                <h2 id="modal-title">Conversation</h2>
+                <div class="modal-meta" id="modal-meta"></div>
+                <div class="modal-section">
+                    <h3>System Prompt</h3>
+                    <pre id="modal-system"></pre>
+                </div>
+                <div class="modal-section">
+                    <h3>User Prompt</h3>
+                    <pre id="modal-user"></pre>
+                </div>
+                <div class="modal-section">
+                    <h3>Assistant Response</h3>
+                    <pre id="modal-response"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,350 @@
+# Task Database - Curated verifiable tasks for OpenClaw bots
+# All tasks are designed to be completed without external network access
+
+# ============================================================
+# Code Generation Tasks
+# ============================================================
+code_generation:
+  simple:
+    - name: count_vowels
+      description: "Count the number of vowels (a,e,i,o,u) in a string"
+      signature: "def count_vowels(s: str) -> int:"
+      test_cases:
+        - input: ["hello"]
+          output: 2
+        - input: ["AEIOU"]
+          output: 5
+        - input: ["xyz"]
+          output: 0
+
+    - name: remove_duplicates
+      description: "Remove duplicate elements from a list while preserving order"
+      signature: "def remove_duplicates(lst: list) -> list:"
+      test_cases:
+        - input: [[1, 2, 2, 3, 1]]
+          output: [1, 2, 3]
+        - input: [["a", "b", "a"]]
+          output: ["a", "b"]
+
+    - name: capitalize_words
+      description: "Capitalize the first letter of each word"
+      signature: "def capitalize_words(s: str) -> str:"
+      test_cases:
+        - input: ["hello world"]
+          output: "Hello World"
+        - input: [""]
+          output: ""
+
+    - name: reverse_list
+      description: "Reverse a list without using built-in reverse"
+      signature: "def reverse_list(lst: list) -> list:"
+      test_cases:
+        - input: [[1, 2, 3]]
+          output: [3, 2, 1]
+        - input: [[]]
+          output: []
+
+    - name: find_maximum
+      description: "Find the maximum value in a list"
+      signature: "def find_maximum(nums: list[int]) -> int:"
+      test_cases:
+        - input: [[1, 5, 3, 9, 2]]
+          output: 9
+        - input: [[-1, -5, -3]]
+          output: -1
+
+  medium:
+    - name: merge_sorted_lists
+      description: "Merge two sorted lists into one sorted list"
+      signature: "def merge_sorted_lists(list1: list[int], list2: list[int]) -> list[int]:"
+      test_cases:
+        - input: [[1, 3, 5], [2, 4, 6]]
+          output: [1, 2, 3, 4, 5, 6]
+        - input: [[], [1, 2]]
+          output: [1, 2]
+
+    - name: valid_parentheses
+      description: "Check if parentheses string is valid"
+      signature: "def valid_parentheses(s: str) -> bool:"
+      test_cases:
+        - input: ["()[]{}"]
+          output: true
+        - input: ["([)]"]
+          output: false
+        - input: ["{[]}"]
+          output: true
+
+    - name: flatten_nested_list
+      description: "Flatten a nested list to a single level"
+      signature: "def flatten(lst: list) -> list:"
+      test_cases:
+        - input: [[[1, [2, 3]], [4, 5]]]
+          output: [1, 2, 3, 4, 5]
+        - input: [[1, 2, 3]]
+          output: [1, 2, 3]
+
+    - name: binary_search
+      description: "Find index of target in sorted list, -1 if not found"
+      signature: "def binary_search(nums: list[int], target: int) -> int:"
+      test_cases:
+        - input: [[1, 2, 3, 4, 5], 3]
+          output: 2
+        - input: [[1, 2, 3], 5]
+          output: -1
+
+  hard:
+    - name: longest_common_subsequence
+      description: "Find the length of the longest common subsequence"
+      signature: "def lcs(text1: str, text2: str) -> int:"
+      test_cases:
+        - input: ["abcde", "ace"]
+          output: 3
+        - input: ["abc", "def"]
+          output: 0
+
+    - name: word_break
+      description: "Check if string can be segmented into dictionary words"
+      signature: "def word_break(s: str, word_dict: list[str]) -> bool:"
+      test_cases:
+        - input: ["leetcode", ["leet", "code"]]
+          output: true
+        - input: ["applepenapple", ["apple", "pen"]]
+          output: true
+
+    - name: min_path_sum
+      description: "Find minimum path sum in a grid from top-left to bottom-right"
+      signature: "def min_path_sum(grid: list[list[int]]) -> int:"
+      test_cases:
+        - input: [[[1, 3, 1], [1, 5, 1], [4, 2, 1]]]
+          output: 7
+
+# ============================================================
+# File Organization Tasks
+# ============================================================
+file_organization:
+  by_extension:
+    description: "Organize files by their extension into folders"
+    files:
+      - "report.txt"
+      - "data.json"
+      - "script.py"
+      - "readme.md"
+      - "config.yaml"
+    expected_structure:
+      txt: ["report.txt"]
+      json: ["data.json"]
+      py: ["script.py"]
+      md: ["readme.md"]
+      yaml: ["config.yaml"]
+
+  by_date:
+    description: "Organize files by date in filename"
+    files:
+      - "report_2024-01-15.txt"
+      - "report_2024-01-20.txt"
+      - "report_2024-02-05.txt"
+    expected_structure:
+      "2024-01": ["report_2024-01-15.txt", "report_2024-01-20.txt"]
+      "2024-02": ["report_2024-02-05.txt"]
+
+  by_category:
+    description: "Organize files by content type"
+    files:
+      - "config.json"
+      - "settings.yaml"
+      - "main.py"
+      - "utils.py"
+      - "README.md"
+      - "API.md"
+    expected_structure:
+      config: ["config.json", "settings.yaml"]
+      code: ["main.py", "utils.py"]
+      docs: ["README.md", "API.md"]
+
+# ============================================================
+# Data Extraction Tasks
+# ============================================================
+data_extraction:
+  contact_info:
+    description: "Extract contact information from text"
+    input_text: |
+      Contact Information:
+      Name: John Smith
+      Email: john.smith@example.com
+      Phone: +1-555-123-4567
+    expected_output:
+      name: "John Smith"
+      email: "john.smith@example.com"
+      phone: "+1-555-123-4567"
+
+  order_details:
+    description: "Extract order details from confirmation"
+    input_text: |
+      Order Confirmation
+      -------------------
+      Customer: Jane Doe
+      Product: Widget Pro
+      Quantity: 5
+      Price: $99.99
+      Total: $499.95
+    expected_output:
+      customer: "Jane Doe"
+      order:
+        product: "Widget Pro"
+        quantity: 5
+        price: 99.99
+
+  employee_records:
+    description: "Extract multiple employee records"
+    input_text: |
+      Employee Records
+      ================
+      Name: Alice Brown
+      Department: Engineering
+      Salary: $85,000
+      ---
+      Name: Bob Wilson
+      Department: Sales
+      Salary: $72,000
+    expected_output:
+      employees:
+        - name: "Alice Brown"
+          department: "Engineering"
+          salary: 85000
+        - name: "Bob Wilson"
+          department: "Sales"
+          salary: 72000
+
+# ============================================================
+# Math Problems
+# ============================================================
+math_problems:
+  arithmetic:
+    - problem: "Calculate: 47 + 83"
+      answer: 130
+
+    - problem: "Calculate: 156 - 89"
+      answer: 67
+
+    - problem: "Calculate: 23 * 17"
+      answer: 391
+
+  algebra:
+    - problem: "Solve for x: 3x + 7 = 28"
+      answer: 7
+
+    - problem: "Solve for x: 2x - 5 = 15"
+      answer: 10
+
+    - problem: "Solve for x: 5x + 3 = 2x + 18"
+      answer: 5
+
+  word_problems:
+    - problem: "A store has 45 apples. They sell 18 and receive 30 more. How many apples?"
+      answer: 57
+
+    - problem: "If 4 workers can make 12 widgets per hour, how many in 5 hours?"
+      answer: 240
+
+    - problem: "A rectangle has length 15cm and width 8cm. What is its perimeter?"
+      answer: 46
+
+# ============================================================
+# Script Creation Tasks
+# ============================================================
+script_creation:
+  word_counter:
+    description: "Create a script that counts word occurrences in a file"
+    test_input: "hello world hello python world python python"
+    expected_output:
+      hello: 2
+      world: 2
+      python: 3
+
+  csv_to_json:
+    description: "Create a script to convert CSV to JSON"
+    test_input: |
+      name,age,city
+      Alice,30,NYC
+      Bob,25,LA
+    expected_output:
+      - name: "Alice"
+        age: "30"
+        city: "NYC"
+      - name: "Bob"
+        age: "25"
+        city: "LA"
+
+  file_finder:
+    description: "Create a script to find files matching a pattern"
+    test_files:
+      - "test1.py"
+      - "test2.py"
+      - "main.py"
+      - "data.json"
+    pattern: "*.py"
+    expected_output:
+      - "test1.py"
+      - "test2.py"
+      - "main.py"
+
+# ============================================================
+# Logic Puzzles
+# ============================================================
+logic_puzzles:
+  sequence:
+    - puzzle: "What comes next: 2, 4, 6, 8, ?"
+      answer: 10
+
+    - puzzle: "What comes next: 1, 4, 9, 16, ?"
+      answer: 25
+
+    - puzzle: "What comes next: 1, 1, 2, 3, 5, 8, ?"
+      answer: 13
+
+  deduction:
+    - puzzle: |
+        Three friends - Alice, Bob, and Carol - each have a different pet.
+        - Alice does not have a cat.
+        - Bob has a dog.
+        - Carol has neither a dog nor a bird.
+        Who has the cat?
+      answer: "Carol"
+
+    - puzzle: |
+        In a race, Amy finished before Bob.
+        Carol finished after Bob but before Diana.
+        Who finished last?
+      answer: "Diana"
+
+# ============================================================
+# Difficulty Mappings
+# ============================================================
+difficulty_mappings:
+  simple:
+    range: [0.0, 0.3]
+    tier: 1
+
+  medium:
+    range: [0.3, 0.6]
+    tier: 2
+
+  hard:
+    range: [0.6, 0.85]
+    tier: 3
+
+  expert:
+    range: [0.85, 1.0]
+    tier: 4
+
+# ============================================================
+# Verification Methods
+# ============================================================
+verification_methods:
+  code_generation: test_cases
+  bug_fix: test_cases
+  file_organization: file_exists
+  data_extraction: schema_validation
+  math_problem: exact_match
+  logic_puzzle: exact_match
+  script_creation: test_cases
