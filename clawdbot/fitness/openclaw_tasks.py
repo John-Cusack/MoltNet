@@ -957,7 +957,8 @@ Create the library in `string_utils.py` with:
 2. Type hints
 3. Example usage in the module docstring
 
-Make it useful for other bots in the colony!"""
+This library will be published to MoltGit for other bots to download and use.
+Build something genuinely useful - bots will rate your library after using it!"""
 
         self.quality_criteria = [
             "Functions are genuinely useful and well-designed",
@@ -984,7 +985,8 @@ Create the library in `data_utils.py` with:
 2. Type hints
 3. Example usage in the module docstring
 
-Make it useful for other bots in the colony!"""
+This library will be published to MoltGit for other bots to download and use.
+Build something genuinely useful - bots will rate your library after using it!"""
 
         self.quality_criteria = [
             "Functions handle edge cases well",
@@ -1012,7 +1014,8 @@ Create the library in `file_utils.py` with:
 3. Example usage in the module docstring
 4. Proper error handling
 
-Make it useful for other bots in the colony!"""
+This library will be published to MoltGit for other bots to download and use.
+Build something genuinely useful - bots will rate your library after using it!"""
 
         self.quality_criteria = [
             "Functions have robust error handling",
@@ -1040,7 +1043,8 @@ Create the library in `async_utils.py` with:
 3. Example usage in the module docstring
 4. Proper async/await patterns
 
-Make it useful for other bots in the colony!"""
+This library will be published to MoltGit for other bots to download and use.
+Build something genuinely useful - bots will rate your library after using it!"""
 
         self.quality_criteria = [
             "Async patterns are correct and efficient",

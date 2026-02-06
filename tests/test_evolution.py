@@ -8,7 +8,6 @@ from clawdbot.evolution.selection import (
     DeathCause,
     ViabilityCheck,
     is_bankrupt,
-    is_starving,
 )
 from clawdbot.evolution.mutation import Mutator, MutationBounds
 
@@ -128,7 +127,6 @@ class TestSelectionConfig:
         config = SelectionConfig.default()
 
         assert config.minimum_viable_balance == 0.001
-        assert config.starvation_threshold == 20
         assert config.enable_culling is False
 
     def test_harsh_config(self):
@@ -136,7 +134,6 @@ class TestSelectionConfig:
         config = SelectionConfig.harsh()
 
         assert config.minimum_viable_balance == 0.005
-        assert config.starvation_threshold == 10
         assert config.enable_culling is True
 
     def test_gentle_config(self):
@@ -144,7 +141,6 @@ class TestSelectionConfig:
         config = SelectionConfig.gentle()
 
         assert config.minimum_viable_balance == 0.0001
-        assert config.starvation_threshold == 50
         assert config.enable_culling is False
 
 
@@ -179,19 +175,6 @@ class TestSelectionPressure:
         assert result.viable is False
         assert result.cause == DeathCause.BANKRUPTCY
         assert "balance" in result.details
-
-    def test_starvation_death(self, selection):
-        """Test starvation detection."""
-        result = selection.check_viability(
-            wallet_balance=0.10,
-            consecutive_failures=25,  # Above threshold
-            cycle_count=50,
-            max_cycles=1000,
-        )
-
-        assert result.viable is False
-        assert result.cause == DeathCause.STARVATION
-        assert "consecutive_failures" in result.details
 
     def test_natural_death(self, selection):
         """Test natural death at max cycles."""
@@ -264,12 +247,6 @@ class TestConvenienceFunctions:
         assert is_bankrupt(0.0001) is True
         assert is_bankrupt(0.01) is False
         assert is_bankrupt(0.001, threshold=0.002) is True
-
-    def test_is_starving(self):
-        """Test starvation check."""
-        assert is_starving(25) is True
-        assert is_starving(10) is False
-        assert is_starving(10, threshold=10) is True
 
 
 class TestMutator:
@@ -400,7 +377,6 @@ class TestDeathCause:
 
         assert "alive" in causes
         assert "bankruptcy" in causes
-        assert "starvation" in causes
         assert "culling" in causes
         assert "natural" in causes
         assert "shutdown" in causes

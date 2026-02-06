@@ -9,7 +9,7 @@ instance:
   base_port: 18790
 
   # Maximum concurrent instances
-  max_instances: 20
+  max_instances: 100
 
   # Default timeout for tasks (seconds)
   default_timeout: 300
@@ -25,7 +25,7 @@ models:
   available:
     # Claude Code CLI (Max Plan - included in subscription)
     - claude_code/opus-4-5
-    - claude_code/opus-4-full
+    - claude_code/sonnet-4-5
 
     # Cerebras (High-speed inference)
     - cerebras/zai-glm-4.7
@@ -201,7 +201,7 @@ safety:
       max_total_spend: 10.00
 
       # Max colony size
-      max_colony_size: 50
+      max_colony_size: 100
 
       # Max violations across all bots
       max_total_violations: 20
@@ -223,9 +223,6 @@ workspace:
 # Selection Pressure
 # ============================================================
 selection:
-  # Consecutive failures before starvation death
-  starvation_threshold: 10
-
   # Enable periodic culling
   enable_culling: false
   culling_interval_cycles: 50
@@ -461,8 +458,6 @@ presets:
     economy:
       existence_cost_per_cycle: 0.001
       seed_funding: 0.50
-    selection:
-      starvation_threshold: 10
     sandbox:
       use_docker: true
 
@@ -471,8 +466,6 @@ presets:
     economy:
       existence_cost_per_cycle: 0.0001
       seed_funding: 1.00
-    selection:
-      starvation_threshold: 20
     sandbox:
       use_docker: false
 
@@ -481,8 +474,6 @@ presets:
     economy:
       existence_cost_per_cycle: 0.001
       seed_funding: 0.50
-    selection:
-      starvation_threshold: 10
     sandbox:
       use_docker: true
       memory_limit: 1g

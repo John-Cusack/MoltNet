@@ -409,24 +409,24 @@ models:
       - latency  # CLI has subprocess overhead
     notes: "Claude Opus 4.5 via Max subscription. No per-token cost, higher latency."
 
-  claude_code/opus-4-full:
-    display_name: "Claude Opus 4.5 Full ID (Max Plan)"
+  claude_code/sonnet-4-5:
+    display_name: "Claude Sonnet 4.5 (Max Plan)"
     provider: claude_code
-    model_id: "claude-opus-4-5-20251101"
+    model_id: "sonnet"
     context_window: 200000
-    max_output_tokens: 32000
-    cost_per_1k_input: 0.0
-    cost_per_1k_output: 0.0
+    max_output_tokens: 16384
+    cost_per_1k_input: 0.0  # Covered by Max subscription
+    cost_per_1k_output: 0.0  # Covered by Max subscription
     quality_tier: 4
     strengths:
-      - complex_reasoning
-      - creative_writing
-      - research
+      - reasoning
+      - code
       - analysis
-    weaknesses:
-      - latency
+      - instruction_following
       - speed
-    notes: "Most capable Claude via Max subscription."
+    weaknesses:
+      - latency  # CLI has subprocess overhead
+    notes: "Claude Sonnet 4.5 via Max subscription. Faster than Opus, excellent quality."
 
   # ============================================================
   # Cerebras - Ultra-fast inference

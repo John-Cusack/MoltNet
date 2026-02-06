@@ -91,7 +91,7 @@ class BotState:
     wallet_balance: float = 0.10  # Start with $0.10 seed funding
     tasks_completed: int = 0
     tasks_failed: int = 0
-    consecutive_failures: int = 0  # For starvation detection
+    consecutive_failures: int = 0  # For reproduction decisions and reflection
     current_state: str = "idle"
     cycle_revenue: float = 0.0
     cycle_api_spend: float = 0.0
@@ -111,7 +111,7 @@ class Bot:
     This bot:
     - Solves real tasks with verifiable outcomes
     - Pays existence costs and API costs
-    - Dies from bankruptcy or starvation
+    - Dies from bankruptcy
     - Reproduces when profitable enough
     - Passes evolved traits to offspring
     """

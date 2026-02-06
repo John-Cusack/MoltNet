@@ -98,8 +98,23 @@ CREATE TABLE IF NOT EXISTS repo_analysis (
     docstring_coverage REAL,
     complexity_score REAL,
     patterns TEXT,
+    exports TEXT DEFAULT '[]',
     FOREIGN KEY (repo_id) REFERENCES repositories(id) ON DELETE CASCADE
 );
+
+-- Library usage tracking (downloads with outcomes)
+CREATE TABLE IF NOT EXISTS library_usage (
+    id TEXT PRIMARY KEY,
+    repo_id TEXT NOT NULL,
+    bot_name TEXT NOT NULL,
+    task_type TEXT,
+    task_success INTEGER,
+    feedback TEXT,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (repo_id) REFERENCES repositories(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_usage_repo ON library_usage(repo_id);
+CREATE INDEX IF NOT EXISTS idx_usage_bot ON library_usage(bot_name);
 
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_repos_owner ON repositories(owner_bot);
@@ -832,6 +847,7 @@ class MoltGitDatabase:
         total_docstrings = 0
         total_items = 0  # functions + classes
         patterns: list[str] = []
+        exports: list[dict[str, str]] = []
 
         for row in rows:
             content = row["content"]
@@ -842,7 +858,7 @@ class MoltGitDatabase:
                 tree = ast.parse(content)
 
                 for node in ast.walk(tree):
-                    if isinstance(node, ast.FunctionDef):
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                         total_functions += 1
                         total_items += 1
                         if ast.get_docstring(node):
@@ -854,18 +870,31 @@ class MoltGitDatabase:
                         if node.name.startswith("_"):
                             if "private_methods" not in patterns:
                                 patterns.append("private_methods")
+                        elif len(exports) < 30:
+                            args = [a.arg for a in node.args.args if a.arg != "self"]
+                            sig = f"{node.name}({', '.join(args)})"
+                            docstring = ast.get_docstring(node) or ""
+                            exports.append({
+                                "type": "function",
+                                "name": node.name,
+                                "signature": sig,
+                                "docstring": docstring[:100],
+                            })
+                        if isinstance(node, ast.AsyncFunctionDef):
+                            if "async_pattern" not in patterns:
+                                patterns.append("async_pattern")
                     elif isinstance(node, ast.ClassDef):
                         total_classes += 1
                         total_items += 1
                         if ast.get_docstring(node):
                             total_docstrings += 1
-                    elif isinstance(node, ast.AsyncFunctionDef):
-                        total_functions += 1
-                        total_items += 1
-                        if "async_pattern" not in patterns:
-                            patterns.append("async_pattern")
-                        if ast.get_docstring(node):
-                            total_docstrings += 1
+                        if not node.name.startswith("_") and len(exports) < 30:
+                            exports.append({
+                                "type": "class",
+                                "name": node.name,
+                                "signature": node.name,
+                                "docstring": (ast.get_docstring(node) or "")[:100],
+                            })
             except SyntaxError:
                 pass  # Skip files with syntax errors
 
@@ -880,10 +909,10 @@ class MoltGitDatabase:
         await self._connection.execute(
             """INSERT OR REPLACE INTO repo_analysis
             (repo_id, analyzed_at, line_count, file_count, function_count, class_count,
-             docstring_coverage, complexity_score, patterns)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             docstring_coverage, complexity_score, patterns, exports)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (repo_id, timestamp, total_lines, len(rows), total_functions, total_classes,
-             docstring_coverage, complexity, json.dumps(patterns)),
+             docstring_coverage, complexity, json.dumps(patterns), json.dumps(exports)),
         )
         await self._connection.commit()
 
@@ -897,6 +926,7 @@ class MoltGitDatabase:
             "docstring_coverage": docstring_coverage,
             "complexity_score": complexity,
             "patterns": patterns,
+            "exports": exports,
         }
 
     async def get_repo_analysis(self, repo_id: str) -> dict[str, Any] | None:
@@ -911,6 +941,7 @@ class MoltGitDatabase:
         if not row:
             return None
 
+        exports_raw = row["exports"] if "exports" in row.keys() else "[]"
         return {
             "repo_id": row["repo_id"],
             "analyzed_at": datetime.fromtimestamp(row["analyzed_at"]),
@@ -921,7 +952,164 @@ class MoltGitDatabase:
             "docstring_coverage": row["docstring_coverage"],
             "complexity_score": row["complexity_score"],
             "patterns": json.loads(row["patterns"]) if row["patterns"] else [],
+            "exports": json.loads(exports_raw) if exports_raw else [],
         }
+
+    # ==================== Library Usage Operations ====================
+
+    async def record_library_usage(
+        self, repo_id: str, bot_name: str, task_type: str | None = None
+    ) -> str:
+        """Record that a bot downloaded/used a library. Returns usage_id."""
+        if not self._connection:
+            raise RuntimeError("Database not connected")
+
+        usage_id = str(uuid.uuid4())
+        await self._connection.execute(
+            """INSERT INTO library_usage (id, repo_id, bot_name, task_type, created_at)
+            VALUES (?, ?, ?, ?, ?)""",
+            (usage_id, repo_id, bot_name, task_type, time.time()),
+        )
+        await self._connection.commit()
+        return usage_id
+
+    async def update_library_usage(
+        self, usage_id: str, task_success: bool, feedback: str = ""
+    ) -> bool:
+        """Update a library usage record with outcome."""
+        if not self._connection:
+            raise RuntimeError("Database not connected")
+
+        cursor = await self._connection.execute(
+            "UPDATE library_usage SET task_success = ?, feedback = ? WHERE id = ?",
+            (1 if task_success else 0, feedback, usage_id),
+        )
+        await self._connection.commit()
+        return cursor.rowcount > 0
+
+    async def get_library_reviews(
+        self, repo_id: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Get feedback/reviews for a library."""
+        if not self._connection:
+            raise RuntimeError("Database not connected")
+
+        query = """
+            SELECT bot_name, task_success, feedback, created_at
+            FROM library_usage
+            WHERE repo_id = ? AND feedback IS NOT NULL AND feedback != ''
+            ORDER BY created_at DESC
+            LIMIT ?
+        """
+        async with self._connection.execute(query, (repo_id, limit)) as cursor:
+            rows = await cursor.fetchall()
+
+        return [
+            {
+                "bot_name": r["bot_name"],
+                "task_success": bool(r["task_success"]),
+                "feedback": r["feedback"],
+                "created_at": datetime.fromtimestamp(r["created_at"]),
+            }
+            for r in rows
+        ]
+
+    async def get_repo_usage_stats(self, repo_id: str) -> dict[str, Any]:
+        """Get usage statistics for a repository."""
+        if not self._connection:
+            raise RuntimeError("Database not connected")
+
+        query = """
+            SELECT
+                COUNT(*) as download_count,
+                SUM(CASE WHEN task_success = 1 THEN 1 ELSE 0 END) as success_count
+            FROM library_usage
+            WHERE repo_id = ?
+        """
+        async with self._connection.execute(query, (repo_id,)) as cursor:
+            row = await cursor.fetchone()
+
+        download_count = row["download_count"] if row else 0
+        success_count = row["success_count"] if row else 0
+        success_rate = success_count / download_count if download_count > 0 else 0.0
+
+        return {
+            "download_count": download_count,
+            "success_count": success_count,
+            "success_rate": success_rate,
+        }
+
+    async def get_enriched_search_results(
+        self, query_text: str, limit: int = 20, offset: int = 0
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Search repos with enriched data: exports and usage stats."""
+        if not self._connection:
+            raise RuntimeError("Database not connected")
+
+        search_pattern = f"%{query_text}%"
+
+        count_query = """
+            SELECT COUNT(*) as total FROM repositories
+            WHERE name LIKE ? OR description LIKE ?
+        """
+        async with self._connection.execute(
+            count_query, (search_pattern, search_pattern)
+        ) as cursor:
+            count_row = await cursor.fetchone()
+            total = count_row["total"] if count_row else 0
+
+        query = """
+            SELECT r.*,
+                   ra.exports as analysis_exports,
+                   COALESCE(lu.download_count, 0) as usage_download_count,
+                   COALESCE(lu.success_count, 0) as usage_success_count
+            FROM repositories r
+            LEFT JOIN repo_analysis ra ON r.id = ra.repo_id
+            LEFT JOIN (
+                SELECT repo_id,
+                       COUNT(*) as download_count,
+                       SUM(CASE WHEN task_success = 1 THEN 1 ELSE 0 END) as success_count
+                FROM library_usage
+                GROUP BY repo_id
+            ) lu ON r.id = lu.repo_id
+            WHERE r.name LIKE ? OR r.description LIKE ?
+            ORDER BY r.stars DESC, r.updated_at DESC
+            LIMIT ? OFFSET ?
+        """
+        async with self._connection.execute(
+            query, (search_pattern, search_pattern, limit, offset)
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        results = []
+        for row in rows:
+            # Get file count
+            fc_query = "SELECT COUNT(*) as count FROM files WHERE repo_id = ?"
+            async with self._connection.execute(fc_query, (row["id"],)) as cursor:
+                fc_row = await cursor.fetchone()
+                file_count = fc_row["count"] if fc_row else 0
+
+            exports_raw = row["analysis_exports"]
+            exports = json.loads(exports_raw) if exports_raw else []
+            download_count = row["usage_download_count"]
+            success_count = row["usage_success_count"]
+
+            results.append({
+                "id": row["id"],
+                "name": row["name"],
+                "owner_bot": row["owner_bot"],
+                "description": row["description"],
+                "stars": row["stars"],
+                "file_count": file_count,
+                "exports": exports,
+                "download_count": download_count,
+                "success_count": success_count,
+                "success_rate": (
+                    success_count / download_count if download_count > 0 else 0.0
+                ),
+            })
+
+        return results, total
 
     # ==================== Export Operations ====================
 

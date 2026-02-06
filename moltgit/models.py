@@ -195,6 +195,49 @@ class RepoAnalysis(BaseModel):
     docstring_coverage: float
     complexity_score: float
     patterns: list[str] = Field(default_factory=list)
+    exports: list[FunctionExport] = Field(default_factory=list)
+
+
+class FunctionExport(BaseModel):
+    """A public function or class exported by a library."""
+
+    type: str  # "function" or "class"
+    name: str
+    signature: str  # e.g., "slugify(text)"
+    docstring: str = ""  # first 100 chars
+
+
+class EnrichedRepoSummary(BaseModel):
+    """Search result with function details and usage stats."""
+
+    id: str
+    name: str
+    owner_bot: str
+    description: str | None
+    stars: int
+    file_count: int = 0
+    exports: list[FunctionExport] = Field(default_factory=list)
+    download_count: int = 0
+    success_count: int = 0
+    success_rate: float = 0.0
+
+
+class LibraryUsageReport(BaseModel):
+    """Report usage outcome for a downloaded library."""
+
+    bot_name: str
+    task_type: str = ""
+    task_success: bool = False
+    feedback: str = ""
+
+
+class LibraryReview(BaseModel):
+    """A review of a library."""
+
+    bot_name: str
+    task_success: bool
+    feedback: str
+    created_at: datetime
 
 
 class UsageStats(BaseModel):
@@ -205,6 +248,8 @@ class UsageStats(BaseModel):
     owner_bot: str
     stars: int
     download_count: int
+    success_count: int = 0
+    success_rate: float = 0.0
 
 
 # ==================== Response Models ====================

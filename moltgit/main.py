@@ -15,10 +15,14 @@ from moltgit.config import settings
 from moltgit.database import db
 from moltgit.models import (
     CodeSearchResult,
+    EnrichedRepoSummary,
     File,
     FileCreate,
     FileSummary,
+    FunctionExport,
     HealthResponse,
+    LibraryReview,
+    LibraryUsageReport,
     PaginatedResponse,
     PRChange,
     PRChangeAction,
@@ -253,6 +257,13 @@ async def create_or_update_file(owner: str, name: str, path: str, payload: FileC
         bot_name=payload.bot_name,
     )
 
+    # Auto-analyze when Python files are pushed so exports stay fresh
+    if path.endswith(".py"):
+        try:
+            await db.analyze_repo(repo["id"])
+        except Exception:
+            pass  # Analysis failure shouldn't block file push
+
     return {
         "status": "created" if is_new else "updated",
         "file_id": file_id,
@@ -421,14 +432,39 @@ async def close_pr(
 @app.get("/search/repos")
 async def search_repos(
     q: str = Query(..., min_length=2, description="Search query"),
+    enriched: bool = Query(default=False, description="Include exports and usage stats"),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    """Search repositories by name/description."""
-    repos, total = await db.search_repos(q, limit=limit, offset=offset)
+    """Search repositories by name/description.
+
+    Set enriched=true to include function exports and usage statistics.
+    """
+    if enriched:
+        results, total = await db.get_enriched_search_results(
+            q, limit=limit, offset=offset
+        )
+        items = [
+            EnrichedRepoSummary(
+                id=r["id"],
+                name=r["name"],
+                owner_bot=r["owner_bot"],
+                description=r["description"],
+                stars=r["stars"],
+                file_count=r["file_count"],
+                exports=[FunctionExport(**e) for e in r["exports"]],
+                download_count=r["download_count"],
+                success_count=r["success_count"],
+                success_rate=r["success_rate"],
+            )
+            for r in results
+        ]
+    else:
+        repos, total = await db.search_repos(q, limit=limit, offset=offset)
+        items = [RepositorySummary(**_repo_to_summary(r)) for r in repos]
 
     return PaginatedResponse(
-        items=[RepositorySummary(**_repo_to_summary(r)) for r in repos],
+        items=items,
         total=total,
         offset=offset,
         limit=limit,
@@ -526,12 +562,13 @@ async def get_repo_analysis(owner: str, name: str, refresh: bool = Query(default
 
 @app.get("/analysis/usage")
 async def get_usage_stats(limit: int = Query(default=20, ge=1, le=100)):
-    """Get repository usage statistics (downloads, stars)."""
+    """Get repository usage statistics (downloads, stars, success rates)."""
     repos = await db.get_trending(limit)
 
     usage_list = []
     for repo in repos:
         download_count = await db.get_download_count(repo["id"])
+        usage_stats = await db.get_repo_usage_stats(repo["id"])
         usage_list.append(
             UsageStats(
                 repo_id=repo["id"],
@@ -539,6 +576,8 @@ async def get_usage_stats(limit: int = Query(default=20, ge=1, le=100)):
                 owner_bot=repo["owner_bot"],
                 stars=repo["stars"],
                 download_count=download_count,
+                success_count=usage_stats["success_count"],
+                success_rate=usage_stats["success_rate"],
             )
         )
 
@@ -546,6 +585,48 @@ async def get_usage_stats(limit: int = Query(default=20, ge=1, le=100)):
     usage_list.sort(key=lambda x: x.stars + x.download_count, reverse=True)
 
     return {"usage": usage_list}
+
+
+# ==================== Library Usage & Reviews ====================
+
+
+@app.post("/repos/{owner}/{name}/usage")
+async def report_library_usage(owner: str, name: str, payload: LibraryUsageReport):
+    """Report usage outcome for a downloaded library."""
+    repo = await db.get_repo(owner, name)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    usage_id = await db.record_library_usage(
+        repo_id=repo["id"],
+        bot_name=payload.bot_name,
+        task_type=payload.task_type,
+    )
+    await db.update_library_usage(
+        usage_id=usage_id,
+        task_success=payload.task_success,
+        feedback=payload.feedback,
+    )
+
+    return {"status": "ok", "usage_id": usage_id}
+
+
+@app.get("/repos/{owner}/{name}/reviews")
+async def get_library_reviews(
+    owner: str,
+    name: str,
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """Get feedback/reviews for a library."""
+    repo = await db.get_repo(owner, name)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    reviews = await db.get_library_reviews(repo["id"], limit=limit)
+    return {
+        "reviews": [LibraryReview(**r) for r in reviews],
+        "count": len(reviews),
+    }
 
 
 # ==================== Export ====================

@@ -355,7 +355,7 @@ class TestErrorHandling:
         await bot._run_cycle()
 
         # In the new system, budget exceeded is a failure
-        # (can't complete task = failure for starvation tracking)
+        # (can't complete task = failure for reproduction decisions)
         assert bot.state.tasks_failed == 1
         assert bot.state.consecutive_failures == 1
 
@@ -470,7 +470,7 @@ class TestDeathMechanisms:
 
     @pytest.mark.asyncio
     async def test_consecutive_failures_tracked(self):
-        """Test that consecutive failures are tracked for starvation."""
+        """Test that consecutive failures are tracked for reproduction decisions."""
         bot = create_mocked_bot("starve-test", task_passes=False)
 
         for _ in range(5):

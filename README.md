@@ -6,7 +6,7 @@ An evolutionary ecosystem where autonomous AI agents compete, adapt, and replica
 
 MoltNet spawns populations of AI bots that:
 
-- **Perform real-world tasks** using OpenClaw (Claude Code CLI) as their execution engine
+- **Perform real-world tasks** using their assigned LLM (Claude, Cerebras, etc.)
 - **Earn rewards** for completing coding, file organization, and reasoning tasks
 - **Pay existence costs** every cycle ($0.001/cycle)
 - **Replicate when profitable** - successful bots spawn children with mutated genomes
@@ -16,7 +16,9 @@ The result: **artificial natural selection** where the fittest AI configurations
 
 ## Key Features
 
-- **OpenClaw Integration**: Bots use Claude Code CLI for autonomous task execution
+- **Multi-LLM Support**: Bots use their genome's assigned model for task execution
+  - Claude models route through a Gateway service using Claude Code CLI
+  - Cerebras models (e.g., GLM-4.7) make direct API calls
 - **Heritable Genomes**: Model selection, thinking level, personality, and tool permissions mutate across generations
 - **Economic Pressure**: API costs and rewards drive evolution toward efficiency
 - **Docker Isolation**: Each bot runs in a sandboxed container with resource limits
@@ -49,8 +51,9 @@ See [docs/QUICKSTART.md](docs/QUICKSTART.md) for detailed setup instructions.
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) package manager
-- OpenClaw CLI (Claude Code) - `npm install -g @anthropic-ai/claude-code`
 - Docker (for sandbox isolation)
+- **For Claude models**: Claude Code CLI - `npm install -g @anthropic-ai/claude-code`
+- **For Cerebras models**: `CEREBRAS_API_KEY` environment variable
 
 ## License
 

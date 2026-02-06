@@ -318,7 +318,7 @@ async function refreshBotList() {
     const tbody = document.querySelector('#bot-list tbody');
 
     if (data.bots.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No active bots</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No active bots</td></tr>';
         return;
     }
 
@@ -326,6 +326,7 @@ async function refreshBotList() {
         <tr>
             <td>${bot.bot_name}</td>
             <td>${bot.generation ?? '-'}</td>
+            <td>${bot.cycle_count ?? '-'}</td>
             <td>${bot.fitness_score?.toFixed(3) ?? '-'}</td>
             <td>${formatState(bot.state)}</td>
             <td>${formatModelName(bot.brain_primary)}</td>

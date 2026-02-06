@@ -146,6 +146,64 @@ async def list_runs(limit: int = Query(default=50, ge=1, le=200)):
     return RunList(runs=runs_list[:limit], count=len(runs_list))
 
 
+@app.post("/api/runs/import")
+async def import_run(run_path: str = Query(..., description="Path to run directory")):
+    """Import a run's logs into the analyzer database.
+
+    This parses JSONL telemetry logs and populates bot_summaries
+    with lifecycle data (births, deaths, replications, cycles).
+    """
+    from analyzer.log_importer import import_run_logs
+
+    run_dir = Path(run_path)
+    if not run_dir.exists():
+        # Try relative to common locations
+        for base in [Path("."), Path("runs"), settings.data_dir / "runs"]:
+            candidate = base / run_path
+            if candidate.exists():
+                run_dir = candidate
+                break
+
+    if not run_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Run directory not found: {run_path}")
+
+    logs_dir = run_dir / "logs"
+    if not logs_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Logs directory not found: {logs_dir}")
+
+    run_id = run_dir.name
+    db_path = settings.combined_db_path
+
+    try:
+        result = import_run_logs(run_id, logs_dir, db_path)
+        return {"status": "success", **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/runs/import-all")
+async def import_all_runs():
+    """Import all runs from the runs directory."""
+    from analyzer.log_importer import import_run_logs
+
+    runs_dir = settings.data_dir / "runs"
+    if not runs_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Runs directory not found: {runs_dir}")
+
+    results = []
+    for run_dir in runs_dir.iterdir():
+        if run_dir.is_dir():
+            logs_dir = run_dir / "logs"
+            if logs_dir.exists():
+                try:
+                    result = import_run_logs(run_dir.name, logs_dir, settings.combined_db_path)
+                    results.append(result)
+                except Exception as e:
+                    results.append({"run_id": run_dir.name, "error": str(e)})
+
+    return {"status": "success", "runs_imported": len(results), "results": results}
+
+
 @app.get("/api/runs/{run_id}")
 async def get_run(run_id: str):
     """Get details for a specific run."""

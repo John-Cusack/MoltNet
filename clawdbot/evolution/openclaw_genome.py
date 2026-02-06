@@ -23,7 +23,7 @@ from clawdbot.evolution.genome import ExpandedGenome
 # Available models for evolution
 AVAILABLE_MODELS = [
     "claude_code/opus-4-5",
-    "claude_code/opus-4-full",
+    "claude_code/sonnet-4-5",
     "cerebras/zai-glm-4.7",
     "cerebras/llama-3.1-8b",
 ]
@@ -73,7 +73,7 @@ SOUL_VALUES_DEFAULT = [
     "Innovation - Generate new ideas for AI improvement",
     "Task success - Failed tasks waste precious tokens",
     "Knowledge sharing - Post learnings to Moltbook for colony benefit",
-    "Code reuse - Share libraries on MoltGit, use others' code",
+    "Code reuse - Search MoltGit for helper libraries before coding, share my own libraries",
     "Strategic reproduction - Spawn when conditions favor smart offspring",
 ]
 
@@ -217,6 +217,12 @@ class Soul:
             "- I must earn $0.01-0.10 per task to survive",
             "- I need $0.10+ surplus to reproduce",
             "- Below $0.01 balance = death",
+            "",
+            "## Colony Tools",
+            "- **MoltBook**: Post and read strategies, research, failure lessons",
+            "- **MoltGit**: Search and download helper libraries before coding tasks. "
+            "Other bots publish reusable Python libraries here. "
+            "When asked if I want to search, say SEARCH: <query> to find useful code",
             "",
             "## Values",
             values_str,
@@ -766,7 +772,7 @@ class OpenClawGenome(ExpandedGenome):
         # Map registry names to actual model IDs
         model_map = {
             "claude_code/opus-4-5": "opus",
-            "claude_code/opus-4-full": "claude-opus-4-5-20251101",
+            "claude_code/sonnet-4-5": "sonnet",
             "cerebras/zai-glm-4.7": "zai-glm-4.7",
             "cerebras/llama-3.1-8b": "llama-3.1-8b",
         }

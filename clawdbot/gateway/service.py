@@ -71,7 +71,7 @@ class GatewayConfig:
     host: str = "0.0.0.0"
 
     # Claude CLI settings
-    claude_max_slots: int = 2  # Max concurrent Claude sessions
+    claude_max_slots: int = 5  # Max concurrent Claude sessions
     claude_path: str | None = None  # Path to claude binary
     claude_timeout: float = 300.0
 

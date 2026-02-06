@@ -171,9 +171,13 @@ class CodeTestVerifier(OpenClawVerifier):
         self,
         workspace: Path | str | None = None,
         timeout_seconds: float = 10.0,
+        extra_python_paths: list[str] | None = None,
     ):
         super().__init__(workspace)
-        self.sandbox = Sandbox(timeout_seconds=timeout_seconds)
+        self.sandbox = Sandbox(
+            timeout_seconds=timeout_seconds,
+            extra_python_paths=extra_python_paths,
+        )
 
     async def verify(self, task: Task, result: TaskResult) -> VerificationResult:
         """Verify code by running unit tests."""
@@ -740,12 +744,14 @@ class ExactMatchVerifier(OpenClawVerifier):
 def get_openclaw_verifier(
     task: OpenClawTask,
     workspace: Path | str,
+    extra_python_paths: list[str] | None = None,
 ) -> OpenClawVerifier:
     """Get the appropriate verifier for an OpenClaw task.
 
     Args:
         task: The task to verify
         workspace: Path to the task workspace
+        extra_python_paths: Additional PYTHONPATH dirs for code verification
 
     Returns:
         Appropriate verifier instance
@@ -760,7 +766,12 @@ def get_openclaw_verifier(
     }
 
     verifier_class = verifier_map.get(task.verification_type, FileOutcomeVerifier)
-    verifier = verifier_class(workspace=workspace)
+    if verifier_class is CodeTestVerifier and extra_python_paths:
+        verifier = verifier_class(
+            workspace=workspace, extra_python_paths=extra_python_paths
+        )
+    else:
+        verifier = verifier_class(workspace=workspace)
 
     return verifier
 
@@ -769,6 +780,7 @@ async def verify_openclaw_task(
     task: OpenClawTask,
     result: TaskResult,
     workspace: Path | str,
+    extra_python_paths: list[str] | None = None,
 ) -> VerificationResult:
     """Convenience function to verify an OpenClaw task.
 
@@ -776,9 +788,10 @@ async def verify_openclaw_task(
         task: The task to verify
         result: The task result
         workspace: Path to the task workspace
+        extra_python_paths: Additional PYTHONPATH dirs for code verification
 
     Returns:
         VerificationResult
     """
-    verifier = get_openclaw_verifier(task, workspace)
+    verifier = get_openclaw_verifier(task, workspace, extra_python_paths)
     return await verifier.verify(task, result)

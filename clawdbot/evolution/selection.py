@@ -12,7 +12,6 @@ class DeathCause(Enum):
 
     ALIVE = "alive"  # Not dead
     BANKRUPTCY = "bankruptcy"  # Wallet below minimum
-    STARVATION = "starvation"  # Too many consecutive failures
     CULLING = "culling"  # Killed by population pressure
     NATURAL = "natural"  # Exceeded max cycles
     SHUTDOWN = "shutdown"  # Manual stop
@@ -44,9 +43,6 @@ class SelectionConfig:
     # Bankruptcy threshold (death if balance below this)
     minimum_viable_balance: float = 0.001
 
-    # Starvation threshold (death after this many consecutive failures)
-    starvation_threshold: int = 20
-
     # Existence cost per cycle (metabolism)
     existence_cost_per_cycle: float = 0.0001
 
@@ -65,7 +61,6 @@ class SelectionConfig:
         """Create harsh selection pressure."""
         return cls(
             minimum_viable_balance=0.005,
-            starvation_threshold=10,
             existence_cost_per_cycle=0.0002,
             enable_culling=True,
             culling_interval_cycles=50,
@@ -77,7 +72,6 @@ class SelectionConfig:
         """Create gentle selection pressure."""
         return cls(
             minimum_viable_balance=0.0001,
-            starvation_threshold=50,
             existence_cost_per_cycle=0.00005,
             enable_culling=False,
         )
@@ -87,7 +81,6 @@ class SelectionConfig:
         """Create default selection config for OpenClaw bots."""
         return cls(
             minimum_viable_balance=0.01,  # Higher threshold for OpenClaw
-            starvation_threshold=10,  # Fewer failures allowed
             existence_cost_per_cycle=0.001,  # Higher cost (full agent)
             enable_culling=False,
         )
@@ -97,7 +90,6 @@ class SelectionConfig:
         """Create harsh selection for OpenClaw bots."""
         return cls(
             minimum_viable_balance=0.02,
-            starvation_threshold=5,
             existence_cost_per_cycle=0.002,
             enable_culling=True,
             culling_interval_cycles=25,
@@ -110,7 +102,6 @@ class SelectionPressure:
 
     This class implements the core evolutionary selection:
     - Bots that can't pay their bills die (bankruptcy)
-    - Bots that consistently fail die (starvation)
     - Optionally, weakest bots are culled periodically
     """
 
@@ -133,7 +124,7 @@ class SelectionPressure:
 
         Args:
             wallet_balance: Current wallet balance
-            consecutive_failures: Number of consecutive task failures
+            consecutive_failures: Number of consecutive task failures (kept for API compatibility)
             cycle_count: Current cycle number
             max_cycles: Maximum allowed cycles
 
@@ -146,14 +137,6 @@ class SelectionPressure:
                 DeathCause.BANKRUPTCY,
                 balance=wallet_balance,
                 threshold=self.config.minimum_viable_balance,
-            )
-
-        # Check starvation
-        if consecutive_failures >= self.config.starvation_threshold:
-            return ViabilityCheck.dead(
-                DeathCause.STARVATION,
-                consecutive_failures=consecutive_failures,
-                threshold=self.config.starvation_threshold,
             )
 
         # Check natural death (age limit)
@@ -250,8 +233,3 @@ class SelectionPressure:
 def is_bankrupt(balance: float, threshold: float = 0.001) -> bool:
     """Check if a balance indicates bankruptcy."""
     return balance < threshold
-
-
-def is_starving(consecutive_failures: int, threshold: int = 20) -> bool:
-    """Check if consecutive failures indicate starvation."""
-    return consecutive_failures >= threshold

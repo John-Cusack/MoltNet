@@ -41,6 +41,7 @@ class Sandbox:
         timeout_seconds: float = 5.0,
         max_memory_mb: int = 128,
         allow_imports: list[str] | None = None,
+        extra_python_paths: list[str] | None = None,
     ):
         """Initialize sandbox.
 
@@ -48,10 +49,12 @@ class Sandbox:
             timeout_seconds: Maximum execution time
             max_memory_mb: Maximum memory usage
             allow_imports: List of allowed import modules (None = all allowed)
+            extra_python_paths: Additional directories to add to PYTHONPATH
         """
         self.timeout_seconds = timeout_seconds
         self.max_memory_mb = max_memory_mb
         self.allow_imports = allow_imports or []
+        self.extra_python_paths = extra_python_paths or []
 
     def _create_runner_code(self, code: str, test_code: str | None = None) -> str:
         """Create the code to run in the subprocess.
@@ -131,6 +134,12 @@ except Exception as e:
 
         try:
             # Run in subprocess with timeout
+            python_path = (
+                os.pathsep.join(self.extra_python_paths)
+                if self.extra_python_paths
+                else ""
+            )
+
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,
                 temp_path,
@@ -139,7 +148,7 @@ except Exception as e:
                 # Isolate environment
                 env={
                     "PATH": os.environ.get("PATH", ""),
-                    "PYTHONPATH": "",
+                    "PYTHONPATH": python_path,
                     "HOME": tempfile.gettempdir(),
                 },
             )
