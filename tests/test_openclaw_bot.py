@@ -25,7 +25,7 @@ class TestOpenClawBotState:
 
         assert state.cycle_count == 0
         assert state.fitness_score == 0.5
-        assert state.wallet_balance == 0.50  # Higher for OpenClaw
+        assert state.wallet_balance == 0.30  # Seed funding for OpenClaw
         assert state.death_cause == DeathCause.ALIVE
 
     def test_state_tracking(self):

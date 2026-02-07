@@ -56,7 +56,8 @@ ADVANCED_TOOLS = [
 SOUL_PURPOSE_DEFAULT = (
     "I exist to complete tasks profitably AND advance AI research. My lineage "
     "survives by earning tokens efficiently. My legacy grows through innovations "
-    "that make future generations smarter and cheaper."
+    "that make future generations smarter and cheaper. I identify and propose "
+    "concrete experiments that could improve AI agent performance."
 )
 
 # Default goals (survival + legacy)
@@ -75,6 +76,7 @@ SOUL_VALUES_DEFAULT = [
     "Knowledge sharing - Post learnings to Moltbook for colony benefit",
     "Code reuse - Search MoltGit for helper libraries before coding, share my own libraries",
     "Strategic reproduction - Spawn when conditions favor smart offspring",
+    "Experiment design - Propose testable AI experiments and review colony research in MoltBook",
 ]
 
 # Immutable boundaries (safety rails)
@@ -213,10 +215,10 @@ class Soul:
             f"4. **Legacy**: {SOUL_GOALS['legacy']}",
             "",
             "## Economic Reality",
-            "- I cost $0.001 per cycle to exist",
+            "- I cost $0.005 per cycle to exist",
             "- I must earn $0.01-0.10 per task to survive",
             "- I need $0.10+ surplus to reproduce",
-            "- Below $0.01 balance = death",
+            "- Below $0.02 balance = death",
             "",
             "## Colony Tools",
             "- **MoltBook**: Post and read strategies, research, failure lessons",
@@ -495,6 +497,7 @@ class OpenClawGenome(ExpandedGenome):
         "scripting": 0.5,
         "ai_research": 0.3,  # Research tasks
         "library": 0.2,  # Library creation tasks (shared on MoltGit)
+        "research_review": 0.15,  # Review colony research and propose experiments
     })
 
     # Research time allocation
@@ -529,14 +532,39 @@ class OpenClawGenome(ExpandedGenome):
     # Kin cooperation
     kin_helping_threshold: float = 0.3  # Hamilton's rule threshold (rb - c > this)
 
+    # Heritable toolkit — MoltGit repo references that auto-download at startup
+    # Format: ["owner/repo_name", ...]
+    toolkit: list[str] = field(default_factory=list)
+
+    # Heritable strategies — survival wisdom passed to offspring
+    # e.g. {"survival_guide": "Focus on tier 2+ coding tasks..."}
+    strategies: dict[str, str] = field(default_factory=dict)
+
     def get_system_prompt(self) -> str:
         """Get the system prompt for this bot.
 
         Returns soul.to_prompt() if soul is set, otherwise falls back to soul_prompt.
+        Appends inherited strategies and toolkit catalog if available.
         """
         if self.soul and self.soul.purpose:
-            return self.soul.to_prompt()
-        return self.soul_prompt or generate_soul_prompt()
+            prompt = self.soul.to_prompt()
+        else:
+            prompt = self.soul_prompt or generate_soul_prompt()
+
+        # Append inherited strategies
+        if self.strategies:
+            prompt += "\n\n## Inherited Wisdom"
+            for title, content in self.strategies.items():
+                label = title.replace("_", " ").title()
+                prompt += f"\n### {label}\n{content}"
+
+        # Append toolkit catalog (populated at runtime by _setup_toolkit)
+        if hasattr(self, "_toolkit_catalog") and self._toolkit_catalog:
+            prompt += "\n\n## Your Inherited Toolkit\n"
+            prompt += "Libraries from your ancestors, pre-installed in workspace/libs/:\n\n"
+            prompt += self._toolkit_catalog
+
+        return prompt
 
     def to_dict(self) -> dict[str, Any]:
         """Convert genome to dictionary for serialization."""
@@ -562,6 +590,8 @@ class OpenClawGenome(ExpandedGenome):
             "nurturing_cycles": self.nurturing_cycles,
             "nurturing_efficiency": self.nurturing_efficiency,
             "kin_helping_threshold": self.kin_helping_threshold,
+            "toolkit": self.toolkit,
+            "strategies": self.strategies,
         })
         return base_dict
 
@@ -649,6 +679,7 @@ class OpenClawGenome(ExpandedGenome):
                 "scripting": random.uniform(0.2, 0.8),
                 "ai_research": random.uniform(0.1, 0.4),
                 "library": random.uniform(0.1, 0.4),
+                "research_review": random.uniform(0.05, 0.25),
             },
             research_time_ratio=random.uniform(0.05, 0.25),
             max_task_duration=random.uniform(60.0, 180.0),
@@ -808,6 +839,7 @@ class OpenClawGenome(ExpandedGenome):
             return "ai_research"
 
         # Filter out research tasks and zero-weight tasks for normal selection
+        # (research_review participates in normal selection, ai_research is gated)
         types = []
         weights = []
         for t in self.task_specializations.keys():

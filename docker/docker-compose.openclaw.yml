@@ -109,6 +109,32 @@ services:
           memory: 256M
           cpus: "0.25"
 
+  # Task Shop - Benchmark Marketplace
+  taskshop:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.taskshop
+    ports:
+      - "9104:9104"
+    volumes:
+      - ../data/taskshop:/data
+    environment:
+      - TASKSHOP_HOST=0.0.0.0
+      - TASKSHOP_PORT=9104
+      - TASKSHOP_DATABASE_PATH=/data/taskshop.db
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-c", "import httpx; httpx.get('http://localhost:9104/health', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+
   # Analyzer - Conversation Analysis & Visualization
   analyzer:
     build:
@@ -155,6 +181,8 @@ services:
         condition: service_healthy
       moltgit:
         condition: service_healthy
+      taskshop:
+        condition: service_healthy
     volumes:
       - ../workspaces/bot-claude-1:/workspace
       - ../logs/bot-claude-1:/logs
@@ -167,6 +195,7 @@ services:
       - OBSERVATORY_URL=http://observatory:9100
       - MOLTBOOK_URL=http://moltbook:9101
       - MOLTGIT_URL=http://moltgit:9103
+      - TASKSHOP_URL=http://taskshop:9104
       - BOT_LOG_DIR=/logs
       # Gateway URL for Claude bots (points to host)
       - GATEWAY_URL=http://host.docker.internal:8080
@@ -195,6 +224,8 @@ services:
         condition: service_healthy
       moltgit:
         condition: service_healthy
+      taskshop:
+        condition: service_healthy
     volumes:
       - ../workspaces/bot-claude-2:/workspace
       - ../logs/bot-claude-2:/logs
@@ -207,6 +238,7 @@ services:
       - OBSERVATORY_URL=http://observatory:9100
       - MOLTBOOK_URL=http://moltbook:9101
       - MOLTGIT_URL=http://moltgit:9103
+      - TASKSHOP_URL=http://taskshop:9104
       - BOT_LOG_DIR=/logs
       - GATEWAY_URL=http://host.docker.internal:8080
       # Analyzer settings
@@ -239,6 +271,8 @@ services:
         condition: service_healthy
       moltgit:
         condition: service_healthy
+      taskshop:
+        condition: service_healthy
     volumes:
       - ../workspaces/bot-cerebras-1:/workspace
       - ../logs/bot-cerebras-1:/logs
@@ -253,6 +287,7 @@ services:
       - OBSERVATORY_URL=http://observatory:9100
       - MOLTBOOK_URL=http://moltbook:9101
       - MOLTGIT_URL=http://moltgit:9103
+      - TASKSHOP_URL=http://taskshop:9104
       - BOT_LOG_DIR=/logs
       # Analyzer settings
       - ANALYZER_DATA_DIR=/data
@@ -277,6 +312,8 @@ services:
         condition: service_healthy
       moltgit:
         condition: service_healthy
+      taskshop:
+        condition: service_healthy
     volumes:
       - ../workspaces/bot-cerebras-2:/workspace
       - ../logs/bot-cerebras-2:/logs
@@ -291,6 +328,7 @@ services:
       - OBSERVATORY_URL=http://observatory:9100
       - MOLTBOOK_URL=http://moltbook:9101
       - MOLTGIT_URL=http://moltgit:9103
+      - TASKSHOP_URL=http://taskshop:9104
       - BOT_LOG_DIR=/logs
       # Analyzer settings
       - ANALYZER_DATA_DIR=/data

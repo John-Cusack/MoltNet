@@ -37,6 +37,20 @@ class KnowledgeEntry:
     cited_by: list[str] = field(default_factory=list)
 
 
+@dataclass
+class MoltbookComment:
+    """A comment on a MoltBook entry."""
+
+    id: str
+    entry_id: str
+    parent_comment_id: str | None
+    author_bot: str
+    author_generation: int
+    timestamp: str
+    content: str
+    replies: list[MoltbookComment] = field(default_factory=list)
+
+
 class MoltbookClient:
     """Client for interacting with Moltbook knowledge sharing system.
 
@@ -302,6 +316,47 @@ class MoltbookClient:
         )
         return result is not None and result.get("status") in ("ok", "already_cited")
 
+    # ==================== Comments ====================
+
+    async def post_comment(self, entry_id: str, content: str) -> str | None:
+        """Post a comment on an entry.
+
+        Returns:
+            Comment ID if successful, None otherwise
+        """
+        payload = {
+            "author_bot": self.bot_name,
+            "author_generation": self.generation,
+            "content": content,
+        }
+        result = await self._request("POST", f"/entries/{entry_id}/comments", json=payload)
+        if result and "id" in result:
+            return result["id"]
+        return None
+
+    async def reply_to_comment(self, comment_id: str, content: str) -> str | None:
+        """Reply to an existing comment.
+
+        Returns:
+            Reply ID if successful, None otherwise
+        """
+        payload = {
+            "author_bot": self.bot_name,
+            "author_generation": self.generation,
+            "content": content,
+        }
+        result = await self._request("POST", f"/comments/{comment_id}/reply", json=payload)
+        if result and "id" in result:
+            return result["id"]
+        return None
+
+    async def get_comments(self, entry_id: str) -> list[MoltbookComment]:
+        """Get threaded comments for an entry."""
+        result = await self._request("GET", f"/entries/{entry_id}/comments")
+        if result and "comments" in result:
+            return [self._parse_comment(c) for c in result["comments"]]
+        return []
+
     # ==================== Topics & Stats ====================
 
     async def get_topics(self) -> list[dict[str, Any]]:
@@ -332,6 +387,20 @@ class MoltbookClient:
             content_preview=data.get("content_preview", ""),
             evidence=data.get("evidence"),
             cited_by=data.get("cited_by", []),
+        )
+
+    def _parse_comment(self, data: dict[str, Any]) -> MoltbookComment:
+        """Parse comment data into MoltbookComment object."""
+        replies = [self._parse_comment(r) for r in data.get("replies", [])]
+        return MoltbookComment(
+            id=data.get("id", ""),
+            entry_id=data.get("entry_id", ""),
+            parent_comment_id=data.get("parent_comment_id"),
+            author_bot=data.get("author_bot", ""),
+            author_generation=data.get("author_generation", 1),
+            timestamp=str(data.get("timestamp", "")),
+            content=data.get("content", ""),
+            replies=replies,
         )
 
 

@@ -30,6 +30,7 @@ from clawdbot.fitness.openclaw_tasks import (
     ScriptCreationTask,
     MathProblemTask,
     ResearchTask,
+    ResearchReviewTask,
 )
 from clawdbot.fitness.sandbox import Sandbox
 
@@ -434,6 +435,10 @@ class LLMJudgeVerifier(OpenClawVerifier):
         if isinstance(task, ResearchTask):
             return await self._verify_research_task(task, result)
 
+        # For research review tasks, use specialized verification
+        if isinstance(task, ResearchReviewTask):
+            return await self._verify_research_review_task(task, result)
+
         if self.judge_backend is None:
             # Fallback to heuristic verification
             return await self._heuristic_verify(task, result)
@@ -590,6 +595,165 @@ class LLMJudgeVerifier(OpenClawVerifier):
             score=min(1.0, score),
             feedback=f"Heuristic research evaluation: {feedback}",
             details={"research_topic": task.research_topic},
+        )
+
+    async def _verify_research_review_task(
+        self, task: ResearchReviewTask, result: TaskResult
+    ) -> VerificationResult:
+        """Verify research review task quality.
+
+        Research reviews are judged on:
+        - Specific feedback on each reviewed entry
+        - Cross-entry pattern identification
+        - Testable experiment proposals
+        - Constructive, analytical tone
+        """
+        # Read output file
+        if self.workspace:
+            output_path = self.workspace / "research_output.md"
+            if output_path.exists():
+                review_content = output_path.read_text()
+            else:
+                review_content = result.raw_response
+        else:
+            review_content = result.raw_response
+
+        if not review_content or len(review_content.strip()) < 100:
+            return VerificationResult(
+                passed=False,
+                score=0.1,
+                feedback="Research review output too short (< 100 chars)",
+            )
+
+        verification_data = task.get_verification_data()
+        quality_criteria = verification_data.get("quality_criteria", [])
+
+        if self.judge_backend is None:
+            return await self._heuristic_research_review_verify(
+                task, review_content, quality_criteria
+            )
+
+        # LLM judge for research reviews
+        criteria_str = "\n".join(f"- {c}" for c in quality_criteria)
+        prompt = f"""Evaluate the quality of this research review.
+
+REVIEW TASK:
+{task.get_prompt()[:1500]}
+
+QUALITY CRITERIA:
+{criteria_str}
+
+REVIEW OUTPUT:
+{review_content[:3000]}
+
+Evaluate:
+1. Does it provide specific feedback on each entry?
+2. Does it identify patterns or contradictions?
+3. Does it propose testable experiments?
+4. Is the tone constructive and analytical?
+
+Score 0.0-1.0. Pass threshold: 0.5.
+Respond with JSON: {{"score": 0.0-1.0, "passed": true/false, "feedback": "..."}}"""
+
+        try:
+            response = await self.judge_backend.generate(
+                prompt=prompt,
+                system=(
+                    "You are a research quality evaluator for an AI agent colony. "
+                    "Judge research reviews on specificity, pattern analysis, and experiment proposals. "
+                    "Respond with JSON: {\"score\": 0.0-1.0, \"passed\": true/false, \"feedback\": \"...\"}"
+                ),
+                max_tokens=500,
+            )
+            judgment = json.loads(response.content)
+            return VerificationResult(
+                passed=judgment.get("passed", False),
+                score=float(judgment.get("score", 0.0)),
+                feedback=judgment.get("feedback", "Research review judgment"),
+            )
+        except Exception:
+            return await self._heuristic_research_review_verify(
+                task, review_content, quality_criteria
+            )
+
+    async def _heuristic_research_review_verify(
+        self,
+        task: ResearchReviewTask,
+        content: str,
+        quality_criteria: list[str],
+    ) -> VerificationResult:
+        """Heuristic verification for research reviews when no LLM judge available."""
+        score = 0.0
+        feedback_parts = []
+
+        # Check length
+        if len(content) >= 500:
+            score += 0.15
+            feedback_parts.append("Good length")
+        elif len(content) >= 200:
+            score += 0.1
+
+        # Check for section headers (structured writing)
+        if "#" in content:
+            score += 0.15
+            feedback_parts.append("Has structure")
+
+        # Check for entry coverage (references to reviewed entries)
+        num_entries = len(task.injected_entries)
+        if num_entries > 0:
+            entry_refs = 0
+            for entry in task.injected_entries:
+                title = entry.get("title", "")
+                author = entry.get("author_bot", "")
+                if title and title.lower() in content.lower():
+                    entry_refs += 1
+                elif author and author in content:
+                    entry_refs += 1
+            coverage = entry_refs / num_entries if num_entries > 0 else 0
+            if coverage >= 0.5:
+                score += 0.2
+                feedback_parts.append(f"Covers {entry_refs}/{num_entries} entries")
+            elif coverage > 0:
+                score += 0.1
+
+        # Check for experiment keywords
+        experiment_words = [
+            "hypothesis", "experiment", "test", "measure", "predict",
+            "expect", "method", "criteria", "propose",
+        ]
+        experiment_count = sum(1 for w in experiment_words if w.lower() in content.lower())
+        if experiment_count >= 3:
+            score += 0.2
+            feedback_parts.append("Contains experiment proposals")
+        elif experiment_count >= 1:
+            score += 0.1
+
+        # Check for constructive tone
+        constructive_words = [
+            "could", "suggest", "improve", "strength", "insight",
+            "interesting", "builds on", "gap", "opportunity",
+        ]
+        constructive_count = sum(1 for w in constructive_words if w.lower() in content.lower())
+        if constructive_count >= 3:
+            score += 0.15
+            feedback_parts.append("Constructive tone")
+        elif constructive_count >= 1:
+            score += 0.1
+
+        # Check for analytical depth (comparisons, reasoning)
+        analytical_words = ["pattern", "across", "contrast", "however", "whereas", "correlation"]
+        if any(w in content.lower() for w in analytical_words):
+            score += 0.15
+            feedback_parts.append("Analytical depth")
+
+        passed = score >= 0.5
+        feedback = "; ".join(feedback_parts) if feedback_parts else "Basic review output"
+
+        return VerificationResult(
+            passed=passed,
+            score=min(1.0, score),
+            feedback=f"Heuristic review evaluation: {feedback}",
+            details={"num_entries_reviewed": num_entries},
         )
 
     def _build_research_judgment_prompt(

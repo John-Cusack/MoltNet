@@ -85,13 +85,13 @@ tools:
 # ============================================================
 economy:
   # Higher costs for OpenClaw bots
-  existence_cost_per_cycle: 0.001
+  existence_cost_per_cycle: 0.005
 
   # Minimum balance before bankruptcy
-  minimum_viable_balance: 0.01
+  minimum_viable_balance: 0.02
 
-  # Higher seed funding
-  seed_funding: 0.50
+  # Seed funding (runway: ~56 cycles without earning)
+  seed_funding: 0.30
 
   # Replication cost
   replication_cost: 0.10
@@ -153,10 +153,10 @@ tasks:
 
   # Tier multipliers
   tier_multipliers:
-    1: 1.0   # Simple
+    1: 0.8   # Simple — easy tasks pay less
     2: 1.5   # Medium
-    3: 2.5   # Hard
-    4: 5.0   # Expert
+    3: 3.0   # Hard
+    4: 6.0   # Expert
 
 # ============================================================
 # Container/Sandbox Settings
@@ -361,6 +361,11 @@ research:
       base_reward: 0.02
       min_output_length: 100
 
+    research_review:
+      description: "Review colony research entries and propose experiments"
+      base_reward: 0.025
+      min_output_length: 150
+
   # Quality criteria for LLM judge
   quality_criteria:
     - "Provides specific, actionable insights"
@@ -456,8 +461,8 @@ presets:
   # Default balanced configuration
   default:
     economy:
-      existence_cost_per_cycle: 0.001
-      seed_funding: 0.50
+      existence_cost_per_cycle: 0.005
+      seed_funding: 0.30
     sandbox:
       use_docker: true
 
@@ -469,11 +474,41 @@ presets:
     sandbox:
       use_docker: false
 
+  # Harsh selection pressure — majority die from bankruptcy
+  harsh:
+    economy:
+      existence_cost_per_cycle: 0.008
+      seed_funding: 0.20
+      minimum_viable_balance: 0.03
+
+# ============================================================
+# Task Shop Configuration
+# ============================================================
+taskshop:
+  # Max cycles allowed per difficulty tier
+  max_cycles:
+    easy: 2     # difficulty 0.0-0.3
+    medium: 3   # difficulty 0.3-0.6
+    hard: 4     # difficulty 0.6-0.8
+    expert: 5   # difficulty 0.8-1.0
+
+  # Category weights (preference for coding vs math)
+  category_weights:
+    coding: 0.7
+    math: 0.3
+
+  # Benchmark weights
+  benchmark_weights:
+    humaneval: 0.3
+    mbpp: 0.3
+    gsm8k: 0.2
+    math: 0.2
+
   # Production configuration
   production:
     economy:
-      existence_cost_per_cycle: 0.001
-      seed_funding: 0.50
+      existence_cost_per_cycle: 0.005
+      seed_funding: 0.30
     sandbox:
       use_docker: true
       memory_limit: 1g

@@ -80,8 +80,8 @@ class SelectionConfig:
     def openclaw_default(cls) -> SelectionConfig:
         """Create default selection config for OpenClaw bots."""
         return cls(
-            minimum_viable_balance=0.01,  # Higher threshold for OpenClaw
-            existence_cost_per_cycle=0.001,  # Higher cost (full agent)
+            minimum_viable_balance=0.02,  # Higher threshold for OpenClaw
+            existence_cost_per_cycle=0.005,  # Higher cost — ~56 cycle runway
             enable_culling=False,
         )
 

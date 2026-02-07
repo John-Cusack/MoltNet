@@ -83,6 +83,7 @@ echo
 stop_service "observatory"
 stop_service "moltbook"
 stop_service "moltgit"
+stop_service "taskshop"
 stop_service "gateway"
 
 # Also clean up any orphaned processes on our ports
@@ -91,6 +92,7 @@ echo "Checking for orphaned processes..."
 kill_by_port 9100 "observatory"
 kill_by_port 9101 "moltbook"
 kill_by_port 9103 "moltgit"
+kill_by_port 9104 "taskshop"
 kill_by_port 8080 "gateway"
 
 echo

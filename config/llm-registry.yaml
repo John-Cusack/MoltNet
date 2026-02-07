@@ -353,7 +353,7 @@ models:
   # ============================================================
   # Zhipu (GLM) - Chinese market
   # ============================================================
-  cerebras/zai-glm-4.7:
+  zhipu/glm-4-plus:
     display_name: "GLM-4 Plus"
     provider: zhipu
     model_id: "glm-4-plus"

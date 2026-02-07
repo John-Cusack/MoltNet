@@ -53,6 +53,7 @@ DEFAULT_RUNS_DIR = Path("./runs")
 os.environ.setdefault("OBSERVATORY_URL", "http://localhost:9100")
 os.environ.setdefault("MOLTBOOK_URL", "http://localhost:9101")
 os.environ.setdefault("MOLTGIT_URL", "http://localhost:9103")
+os.environ.setdefault("TASKSHOP_URL", "http://localhost:9104")
 os.environ.setdefault("GATEWAY_URL", "http://localhost:8080")
 
 from clawdbot.evolution.openclaw_genome import OpenClawGenome, AVAILABLE_MODELS
@@ -69,7 +70,7 @@ class SimulatedBotState:
     """State for simulated bot."""
     cycle_count: int = 0
     fitness_score: float = 0.5
-    wallet_balance: float = 0.50
+    wallet_balance: float = 0.30
     tasks_completed: int = 0
     tasks_failed: int = 0
     consecutive_failures: int = 0
@@ -80,6 +81,25 @@ class SimulatedBotState:
     last_replication_cycle: int = -10
     total_revenue: float = 0.0
     total_api_spend: float = 0.0
+
+
+class ColonyEventLog:
+    """Tracks narrative events for demo output."""
+
+    _events: list[tuple[int, str, str]] = []  # (cycle, bot_name, message)
+
+    @classmethod
+    def log(cls, cycle: int, bot_name: str, message: str):
+        cls._events.append((cycle, bot_name, message))
+        print(f"  [Cycle {cycle}] {bot_name}: {message}")
+
+    @classmethod
+    def clear(cls):
+        cls._events.clear()
+
+    @classmethod
+    def get_events(cls) -> list[tuple[int, str, str]]:
+        return cls._events.copy()
 
 
 class SimulatedOpenClawBot:
@@ -98,7 +118,7 @@ class SimulatedOpenClawBot:
         workspace: Path,
         workspace_base: Path | None = None,
         log_dir: Path | None = None,
-        initial_balance: float = 0.50,
+        initial_balance: float = 0.30,
     ):
         self.genome = genome
         self.workspace = workspace
@@ -173,13 +193,21 @@ class SimulatedOpenClawBot:
                 await self._run_cycle()
 
                 # Check bankruptcy
-                if self.state.wallet_balance < 0.01:
+                if self.state.wallet_balance < 0.02:
                     self.state.death_cause = "bankruptcy"
+                    ColonyEventLog.log(
+                        self.state.cycle_count, self.name,
+                        f"BANKRUPT (${self.state.wallet_balance:.3f}, survived {self.state.cycle_count} cycles)"
+                    )
                     break
 
                 # Check starvation
                 if self.state.consecutive_failures >= 5:
                     self.state.death_cause = "starvation"
+                    ColonyEventLog.log(
+                        self.state.cycle_count, self.name,
+                        "STARVED (5 consecutive failures)"
+                    )
                     break
 
                 # Check replication!
@@ -378,6 +406,12 @@ class SimulatedOpenClawBot:
         # Post reproduction insight to Moltbook
         await self._post_reproduction_insight(child_name, child_balance, mutation_result)
 
+        ColonyEventLog.log(
+            self.state.cycle_count, self.name,
+            f"REPRODUCED -> {child_name} (investment: ${child_balance:.3f}, "
+            f"{mutation_result.mutation_count} mutations)"
+        )
+
         print(f"\n{'='*60}")
         print(f"REPLICATION! {self.name} -> {child_name}")
         print(f"  Generation: {self.generation} -> {child_genome.generation}")
@@ -450,7 +484,7 @@ class SimulatedOpenClawBot:
         self.state.cycle_count += 1
 
         # Deduct existence cost
-        existence_cost = 0.001
+        existence_cost = 0.005
         self.state.wallet_balance -= existence_cost
         self.state.total_api_spend += existence_cost
 
@@ -697,10 +731,17 @@ def get_all_colony_bots(bots: list, simulated: bool) -> list:
         return list(OpenClawBot._colony.values())
 
 
-def print_status(bots: list, elapsed: float, simulated: bool = True):
-    """Print colony status."""
-    all_bots = get_all_colony_bots(bots, simulated)
-    if not all_bots:
+def print_status(bots: list, elapsed: float, simulated: bool = True, use_colony: bool = True):
+    """Print colony status.
+
+    When use_colony=True (default), queries the live colony dict for the full
+    bot list. When False, uses the bots list directly (for post-shutdown snapshots).
+    """
+    if use_colony:
+        all_bots = get_all_colony_bots(bots, simulated)
+        if not all_bots:
+            all_bots = bots
+    else:
         all_bots = bots
 
     print("\n" + "=" * 85)
@@ -739,6 +780,7 @@ async def run_simulated_colony(bot_count: int, workspace_base: Path, log_dir: Pa
     print(f"Logs: {log_dir}")
 
     SimulatedOpenClawBot._colony.clear()
+    ColonyEventLog.clear()
 
     bots = []
     for i in range(bot_count):
@@ -754,7 +796,7 @@ async def run_simulated_colony(bot_count: int, workspace_base: Path, log_dir: Pa
             workspace=workspace,
             workspace_base=workspace_base,
             log_dir=log_dir,
-            initial_balance=0.50,
+            initial_balance=0.30,
         )
         bots.append(bot)
         print(f"\n  Created: {bot.name}")
@@ -804,7 +846,7 @@ async def run_real_colony(bot_count: int, workspace_base: Path, log_dir: Path, m
         bot = OpenClawBot(
             genome=genome,
             workspace_base=workspace_base,
-            initial_balance=0.50,
+            initial_balance=0.30,
         )
         bots.append(bot)
         print(f"\n  Created: {bot.genome.name}")
@@ -816,11 +858,48 @@ async def run_real_colony(bot_count: int, workspace_base: Path, log_dir: Path, m
     return bots
 
 
+async def _maybe_load_benchmarks() -> None:
+    """Load benchmarks into Task Shop if it has no tasks yet."""
+    import httpx
+
+    taskshop_url = os.environ.get("TASKSHOP_URL", "http://localhost:9104")
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{taskshop_url}/tasks", params={"limit": 1}, timeout=5.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                # If tasks already loaded, skip
+                if data.get("tasks") or data.get("total", 0) > 0:
+                    print("Task Shop: benchmarks already loaded")
+                    return
+    except Exception:
+        pass
+
+    print("Task Shop: loading benchmarks...")
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["uv", "run", "python", "scripts/load_benchmarks.py",
+             "--benchmarks", "humaneval,mbpp,gsm8k,math"],
+            capture_output=True, text=True, timeout=120, cwd=os.path.dirname(__file__) or ".",
+        )
+        if result.returncode == 0:
+            # Count loaded tasks from output
+            for line in result.stdout.splitlines():
+                if line.strip():
+                    print(f"  {line.strip()}")
+        else:
+            print(f"  Warning: benchmark loading failed: {result.stderr[:200]}")
+    except Exception as e:
+        print(f"  Warning: could not load benchmarks: {e}")
+
+
 async def check_services() -> dict[str, bool]:
     """Check if Observatory, Moltbook, and MoltGit are running."""
     import httpx
 
-    results = {"observatory": False, "moltbook": False, "moltgit": False}
+    results = {"observatory": False, "moltbook": False, "moltgit": False, "taskshop": False}
 
     async with httpx.AsyncClient() as client:
         # Check Observatory
@@ -844,7 +923,122 @@ async def check_services() -> dict[str, bool]:
         except Exception:
             pass
 
+        # Check Task Shop
+        try:
+            resp = await client.get(f"{os.environ.get('TASKSHOP_URL')}/health", timeout=2.0)
+            results["taskshop"] = resp.status_code == 200
+        except Exception:
+            pass
+
     return results
+
+
+def print_evolutionary_summary(all_bots: list, simulated: bool = True):
+    """Print evolutionary insights at end of run."""
+    if not all_bots:
+        return
+
+    print("\n" + "=" * 70)
+    print("EVOLUTIONARY INSIGHTS")
+    print("=" * 70)
+
+    # Death causes
+    dead_bots = [b for b in all_bots if not b.is_alive]
+    if dead_bots:
+        causes: dict[str, int] = {}
+        for b in dead_bots:
+            cause = b.state.death_cause
+            cause_str = cause.value if hasattr(cause, "value") else str(cause)
+            causes[cause_str] = causes.get(cause_str, 0) + 1
+
+        print("\nDeath Causes:")
+        total_dead = len(dead_bots)
+        for cause, count in sorted(causes.items(), key=lambda x: -x[1]):
+            pct = count / total_dead * 100
+            print(f"  {cause.capitalize()}: {count} ({pct:.0f}%)")
+
+    # Lineage tree
+    print("\nLineage Tree:")
+    # Build parent -> children map
+    parent_map: dict[str | None, list] = {}
+    for b in all_bots:
+        parent = b.genome.parent_name
+        parent_map.setdefault(parent, []).append(b)
+
+    def print_tree(parent_name: str | None, prefix: str = "  ", is_last: bool = True):
+        children = parent_map.get(parent_name, [])
+        # Sort by generation then name
+        children.sort(key=lambda b: (b.generation, b.name))
+        for i, bot in enumerate(children):
+            is_last_child = (i == len(children) - 1)
+            connector = "└── " if is_last_child else "├── "
+            alive_str = "★ alive" if bot.is_alive else "DEAD"
+            cause = ""
+            if not bot.is_alive:
+                c = bot.state.death_cause
+                cause = f" ({c.value if hasattr(c, 'value') else c})"
+            # Get toolkit info
+            toolkit_len = len(getattr(bot.genome, "toolkit", []))
+            toolkit_str = f", toolkit: {toolkit_len}" if toolkit_len > 0 else ""
+            print(
+                f"{prefix}{connector}{bot.name} "
+                f"(Gen {bot.generation}, {bot.state.cycle_count} cycles, "
+                f"${bot.state.wallet_balance:.3f}{toolkit_str}) {alive_str}{cause}"
+            )
+            extension = "    " if is_last_child else "│   "
+            print_tree(bot.name, prefix + extension, is_last_child)
+
+    # Find root bots (no parent or parent not in colony)
+    all_names = {b.name for b in all_bots}
+    roots = [
+        b for b in all_bots
+        if not b.genome.parent_name or b.genome.parent_name not in all_names
+    ]
+    for root in sorted(roots, key=lambda b: b.name):
+        alive_str = "★ alive" if root.is_alive else "DEAD"
+        cause = ""
+        if not root.is_alive:
+            c = root.state.death_cause
+            cause = f" ({c.value if hasattr(c, 'value') else c})"
+        toolkit_len = len(getattr(root.genome, "toolkit", []))
+        toolkit_str = f", toolkit: {toolkit_len}" if toolkit_len > 0 else ""
+        print(
+            f"  {root.name} "
+            f"(Gen {root.generation}, {root.state.cycle_count} cycles, "
+            f"${root.state.wallet_balance:.3f}{toolkit_str}) {alive_str}{cause}"
+        )
+        print_tree(root.name, "  ")
+
+    # Toolkit evolution
+    bots_with_toolkit = [b for b in all_bots if getattr(b.genome, "toolkit", [])]
+    if bots_with_toolkit:
+        print("\nToolkit Evolution:")
+        for b in sorted(bots_with_toolkit, key=lambda b: (b.generation, b.name)):
+            tools = b.genome.toolkit
+            print(f"  {b.name}: {tools}")
+
+    # Knowledge economy
+    alive_bots = [b for b in all_bots if b.is_alive]
+    if alive_bots:
+        best_earner = max(all_bots, key=lambda b: b.state.total_revenue)
+        longest_survivor = max(all_bots, key=lambda b: b.state.cycle_count)
+        print("\nKnowledge Economy:")
+        print(f"  Top earner: {best_earner.name} (${best_earner.state.total_revenue:.3f} revenue)")
+        cycles = longest_survivor.state.cycle_count
+        print(f"  Longest survivor: {longest_survivor.name} ({cycles} cycles)")
+
+    # Strategies
+    bots_with_strategies = [
+        b for b in all_bots if getattr(b.genome, "strategies", {})
+    ]
+    if bots_with_strategies:
+        print("\nHeritable Strategies:")
+        for b in bots_with_strategies[:3]:
+            for key, val in b.genome.strategies.items():
+                preview = val[:100] + "..." if len(val) > 100 else val
+                print(f"  {b.name} ({key}): {preview}")
+
+    print("=" * 70)
 
 
 def save_run_summary(runs_dir: Path, summary: dict):
@@ -905,6 +1099,11 @@ async def main():
     print(f"Observatory: {'CONNECTED' if services['observatory'] else 'NOT RUNNING'}")
     print(f"Moltbook: {'CONNECTED' if services['moltbook'] else 'NOT RUNNING'}")
     print(f"MoltGit: {'CONNECTED' if services['moltgit'] else 'NOT RUNNING'}")
+    print(f"Task Shop: {'CONNECTED' if services['taskshop'] else 'NOT RUNNING'}")
+
+    # Load benchmarks if Task Shop is running but empty
+    if services["taskshop"]:
+        await _maybe_load_benchmarks()
 
     any_missing = not all(services.values())
     if any_missing:
@@ -988,9 +1187,13 @@ async def main():
     except asyncio.CancelledError:
         pass
 
+    # Snapshot the full colony BEFORE shutdown (close() removes bots from _colony dict)
+    all_bots_final = get_all_colony_bots(bots, simulate)
+    if not all_bots_final:
+        all_bots_final = list(bots)
+
     # Stop all bots
-    all_bots = get_all_colony_bots(bots, simulate)
-    for bot in all_bots:
+    for bot in all_bots_final:
         bot.stop()
 
     print("\nWaiting for bots to shut down...")
@@ -1000,12 +1203,9 @@ async def main():
         except (asyncio.CancelledError, asyncio.TimeoutError):
             pass
 
-    # Final status
+    # Final status using snapshot (not re-querying empty colony dict)
     elapsed = time.time() - start_time
-    print_status(bots, elapsed, simulated=simulate)
-
-    # Collect final stats
-    all_bots_final = list(set(get_all_colony_bots(bots, simulate) + bots))
+    print_status(all_bots_final, elapsed, simulated=simulate, use_colony=False)
 
     total_cycles = sum(b.state.cycle_count for b in all_bots_final)
     total_completed = sum(b.state.tasks_completed for b in all_bots_final)
@@ -1023,6 +1223,9 @@ async def main():
     print(f"Tasks failed: {total_failed}")
     print(f"Runtime: {elapsed:.1f}s")
     print()
+
+    # Evolutionary insights
+    print_evolutionary_summary(all_bots_final, simulated=simulate)
 
     # Save run summary
     summary = {

@@ -1,0 +1,38 @@
+# Dockerfile for Task Shop - Benchmark Marketplace Service
+FROM python:3.12-slim
+
+# Set up working directory
+WORKDIR /app
+
+# Install uv for faster dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Copy project files
+COPY pyproject.toml uv.lock ./
+COPY taskshop/ ./taskshop/
+
+# Minimal clawdbot subtree for sandbox import (stub __init__.py files)
+RUN mkdir -p clawdbot/fitness
+RUN touch clawdbot/__init__.py clawdbot/fitness/__init__.py
+COPY clawdbot/fitness/sandbox.py ./clawdbot/fitness/sandbox.py
+
+# Install dependencies
+RUN uv sync --frozen --no-dev
+
+# Create data directory
+RUN mkdir -p /data
+
+# Set environment variables
+ENV TASKSHOP_HOST=0.0.0.0
+ENV TASKSHOP_PORT=9104
+ENV TASKSHOP_DATABASE_PATH=/data/taskshop.db
+
+# Expose port
+EXPOSE 9104
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:9104/health', timeout=5)" || exit 1
+
+# Run Task Shop
+CMD ["uv", "run", "python", "-m", "taskshop.main"]

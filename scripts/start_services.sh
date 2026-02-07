@@ -9,6 +9,7 @@
 #   - Observatory (port 9100) - Telemetry dashboard
 #   - Moltbook (port 9101) - Knowledge sharing
 #   - MoltGit (port 9103) - Code repository
+#   - Task Shop (port 9104) - Benchmark marketplace
 
 set -e
 
@@ -21,6 +22,7 @@ LOG_DIR="$PROJECT_DIR/service_logs"
 OBSERVATORY_PORT=9100
 MOLTBOOK_PORT=9101
 MOLTGIT_PORT=9103
+TASKSHOP_PORT=9104
 GATEWAY_PORT=8080
 
 # Colors
@@ -95,6 +97,7 @@ echo
 start_service "observatory" $OBSERVATORY_PORT "observatory.main"
 start_service "moltbook" $MOLTBOOK_PORT "moltbook.main"
 start_service "moltgit" $MOLTGIT_PORT "moltgit.main"
+start_service "taskshop" $TASKSHOP_PORT "taskshop.main"
 
 # Start gateway (for real bot runs with Claude CLI)
 start_gateway() {
@@ -133,6 +136,7 @@ echo "========================================"
 echo "  Observatory: http://localhost:$OBSERVATORY_PORT"
 echo "  Moltbook:    http://localhost:$MOLTBOOK_PORT"
 echo "  MoltGit:     http://localhost:$MOLTGIT_PORT"
+echo "  Task Shop:   http://localhost:$TASKSHOP_PORT"
 echo "  Gateway:     http://localhost:$GATEWAY_PORT (Claude CLI router)"
 echo
 echo "Logs: $LOG_DIR/"

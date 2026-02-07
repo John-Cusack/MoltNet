@@ -62,6 +62,7 @@ from clawdbot.exceptions import BackendError
 from clawdbot.fitness.openclaw_tasks import (
     OpenClawTask,
     OpenClawTaskType,
+    ResearchReviewTask,
     generate_openclaw_task,
 )
 from clawdbot.fitness.openclaw_verifiers import verify_openclaw_task
@@ -72,6 +73,7 @@ from clawdbot.sandbox.container import ContainerSandbox, ContainerConfig, Contai
 from clawdbot.logging import create_file_logger
 from clawdbot.moltbook_client import MoltbookClient, create_moltbook_client
 from clawdbot.moltgit_client import MoltGitClient, create_moltgit_client
+from clawdbot.taskshop_client import TaskShopClient, create_taskshop_client
 from clawdbot.telemetry import TelemetryReporter
 from clawdbot.conversation_logger import ConversationLogger, create_conversation_logger
 from clawdbot.reflection import (
@@ -87,6 +89,7 @@ from clawdbot.reflection import (
 )
 
 import random
+import re
 import copy
 
 
@@ -96,7 +99,7 @@ class OpenClawBotState:
 
     cycle_count: int = 0
     fitness_score: float = 0.5
-    wallet_balance: float = 0.50  # Higher seed funding for OpenClaw
+    wallet_balance: float = 0.30  # Seed funding for OpenClaw (~56 cycle runway)
     tasks_completed: int = 0
     tasks_failed: int = 0
     consecutive_failures: int = 0
@@ -332,6 +335,14 @@ class OpenClawMutator:
                     child_data[trait] = new_val
                     mutations_applied.append(f"{trait}: {old_val} -> {new_val}")
 
+        # Toolkit mutation: small chance to drop a toolkit entry (simulates forgetting)
+        toolkit = child_data.get("toolkit", [])
+        if toolkit and random.random() < 0.05:
+            dropped = random.choice(toolkit)
+            toolkit.remove(dropped)
+            child_data["toolkit"] = toolkit
+            mutations_applied.append(f"toolkit: dropped {dropped}")
+
         # Force at least one mutation if requested
         if force_mutation and not mutations_applied:
             old_model = child_data["openclaw_model"]
@@ -361,8 +372,6 @@ class OpenClawBot:
 
     # Class-level colony tracking
     _colony: dict[str, "OpenClawBot"] = {}
-    _colony_lock: asyncio.Lock | None = None
-
     # Port allocation
     _next_port: int = 18790
 
@@ -495,10 +504,20 @@ class OpenClawBot:
         )
 
         # ================================================================
+        # Task Shop - Benchmark Marketplace
+        # ================================================================
+        self.taskshop = create_taskshop_client(
+            bot_name=self.genome.name,
+        )
+
+        # ================================================================
         # Colony Knowledge Cache
         # ================================================================
         self._knowledge_cache: dict[str, tuple[float, Any]] = {}
         self._knowledge_cache_ttl: float = 300.0  # 5 minutes
+
+        # Track MoltBook entry IDs used in current cycle for citation-on-success
+        self._knowledge_entry_ids: list[str] = []
 
         # Allocate port
         self._port = OpenClawBot._next_port
@@ -533,6 +552,9 @@ class OpenClawBot:
         # Initialize backend (spawn for OpenClaw, no-op for others)
         if hasattr(self.backend, 'spawn'):
             await self.backend.spawn()
+
+        # Download inherited toolkit libraries from MoltGit
+        await self._setup_toolkit()
 
         # Write SOUL.md to workspace for reference
         soul_path = self.workspace / "SOUL.md"
@@ -672,7 +694,295 @@ class OpenClawBot:
         )
 
     async def _run_cycle(self) -> None:
-        """Run a single cycle with real task execution."""
+        """Run a single cycle - routes to Task Shop or legacy system."""
+        if self.taskshop.is_enabled:
+            await self._run_taskshop_cycle()
+        else:
+            await self._run_legacy_cycle()
+
+    async def _run_taskshop_cycle(self) -> None:
+        """Run a cycle using the Task Shop benchmark marketplace.
+
+        Flow:
+        1. Deduct existence cost
+        2. Get or claim a task assignment
+        3. Build prompt with conversation history
+        4. Generate response (any backend works - text only)
+        5. Parse action (SUBMIT/CONTINUE/QUIT)
+        6. Submit cycle to Task Shop
+        7. If completed: update wallet with payout
+        """
+        start_time = time.time()
+        self.state.current_state = "active"
+        cycle_revenue = 0.0
+
+        # Deduct existence cost
+        existence_cost = self.selection.get_existence_cost()
+        self.state.wallet_balance -= existence_cost
+
+        try:
+            # Get active assignment or claim a new one
+            assignment = await self._get_or_claim_assignment()
+            if not assignment:
+                # No tasks available, skip cycle
+                self.state.cycle_count += 1
+                self.state.last_cycle_time = time.time() - start_time
+                self.state.current_state = "idle"
+                return
+
+            self.state.last_task_id = assignment.assignment_id
+            self.state.last_task_type = f"taskshop_{assignment.category}"
+
+            # Build prompt with task + conversation history
+            prompt = self._build_taskshop_prompt(assignment)
+
+            # Generate response using backend (any backend works)
+            system_prompt = self.genome.get_system_prompt()
+            response = await self.backend.generate(
+                prompt=prompt,
+                system=system_prompt,
+                max_turns=self.genome._calculate_max_turns(),
+            )
+
+            response_text = response.content
+
+            # Parse the cycle action from response
+            action = self._parse_cycle_action(response_text)
+
+            # Submit cycle to Task Shop
+            cycle_result = await self.taskshop.submit_cycle(
+                assignment_id=assignment.assignment_id,
+                action=action,
+                response_content=response_text,
+            )
+
+            if cycle_result is None:
+                self.state.consecutive_failures += 1
+                self.state.tasks_failed += 1
+                self.state.last_task_success = False
+            elif cycle_result.status in ("completed", "failed"):
+                # Task is done (submitted or auto-submitted at max cycles)
+                if cycle_result.status == "completed" and cycle_result.payout:
+                    cycle_revenue = cycle_result.payout
+                    self.state.wallet_balance += cycle_revenue
+                    self.state.consecutive_failures = 0
+                    self.state.tasks_completed += 1
+                    self.state.last_task_success = True
+                else:
+                    self.state.consecutive_failures += 1
+                    self.state.tasks_failed += 1
+                    self.state.last_task_success = False
+
+                # Log conversation
+                self.conversation_logger.log_conversation(
+                    bot_name=self.genome.name,
+                    bot_generation=self.genome.generation,
+                    model=self.genome.openclaw_model,
+                    interaction_type="taskshop_execution",
+                    user_prompt=prompt,
+                    assistant_response=response_text,
+                    system_prompt=system_prompt,
+                    task_id=assignment.assignment_id,
+                    task_type=f"taskshop_{assignment.benchmark}",
+                    input_tokens=response.total_tokens // 2,
+                    output_tokens=response.total_tokens // 2,
+                    latency_ms=(time.time() - start_time) * 1000,
+                    cost_usd=response.cost_usd,
+                    success=cycle_result.status == "completed",
+                    score=cycle_result.score or 0.0,
+                )
+
+                # Report task outcome
+                self.telemetry.report_event(
+                    event_type="taskshop_task_completed",
+                    bot_name=self.name,
+                    data={
+                        "assignment_id": assignment.assignment_id,
+                        "benchmark": assignment.benchmark,
+                        "category": assignment.category,
+                        "difficulty": assignment.difficulty,
+                        "status": cycle_result.status,
+                        "score": cycle_result.score,
+                        "payout": cycle_result.payout,
+                        "cycles_spent": cycle_result.cycles_spent,
+                    },
+                )
+            elif cycle_result.status == "active":
+                # Continuing - task still in progress
+                pass
+            elif cycle_result.status == "abandoned":
+                self.state.consecutive_failures += 1
+                self.state.tasks_failed += 1
+                self.state.last_task_success = False
+
+        except BackendError as e:
+            self.state.consecutive_failures += 1
+            self.state.tasks_failed += 1
+            self.state.last_task_success = False
+            self.telemetry.report_event(
+                event_type="taskshop_cycle_error",
+                bot_name=self.name,
+                data={"error": str(e), "error_type": "backend"},
+            )
+
+        except Exception as e:
+            self.state.consecutive_failures += 1
+            self.state.tasks_failed += 1
+            self.state.last_task_success = False
+            self.telemetry.report_event(
+                event_type="taskshop_cycle_error",
+                bot_name=self.name,
+                data={"error": str(e), "type": type(e).__name__},
+            )
+
+        # Update stats
+        self.state.cycle_count += 1
+        self.state.cycle_revenue = cycle_revenue
+        self.state.total_revenue += cycle_revenue
+        self.state.total_api_spend += existence_cost
+        self.state.last_cycle_time = time.time() - start_time
+        self.state.current_state = "idle"
+
+        # Update self-awareness modules
+        self.awareness.record_cycle(
+            balance=self.state.wallet_balance,
+            income=cycle_revenue,
+            cost=existence_cost,
+            task_type=self.state.last_task_type,
+            task_success=self.state.last_task_success,
+        )
+
+        # Track recent tasks for reflection context
+        self._recent_tasks.append({
+            "task_type": self.state.last_task_type,
+            "success": self.state.last_task_success,
+            "reward": cycle_revenue,
+        })
+        self._recent_tasks = self._recent_tasks[-10:]
+
+        # Write heritable strategy every 10 cycles (if doing well enough)
+        if self.state.cycle_count > 0 and self.state.cycle_count % 10 == 0:
+            total = self.state.tasks_completed + self.state.tasks_failed
+            rate = self.state.tasks_completed / total if total > 0 else 0
+            if rate > 0.3:
+                asyncio.create_task(self._write_strategy())
+
+        # Check if it's time for reflection
+        await self._maybe_reflect()
+
+        # Report to parent periodically
+        if self.state.cycle_count % 10 == 0:
+            self._report_status_to_parent()
+
+        # Update display fitness
+        self._update_display_fitness()
+
+        # Report telemetry
+        self._report_telemetry()
+
+    async def _get_or_claim_assignment(self):
+        """Get active assignment or claim a new one from Task Shop."""
+        from clawdbot.taskshop_client import TaskAssignment
+
+        # Check for existing active assignment
+        assignment = await self.taskshop.get_active_assignment()
+        if assignment:
+            return assignment
+
+        # Claim a new task using genome's difficulty preference
+        diff_pref = self.genome.difficulty_preference
+        # Map difficulty_preference (0-1) to a range around it
+        margin = 0.3
+        diff_min = max(0.0, diff_pref - margin)
+        diff_max = min(1.0, diff_pref + margin)
+
+        return await self.taskshop.claim_task(
+            difficulty_min=diff_min,
+            difficulty_max=diff_max,
+            max_cycles=3,
+        )
+
+    def _build_taskshop_prompt(self, assignment) -> str:
+        """Build a prompt for the bot with task + conversation history."""
+        from clawdbot.taskshop_client import TaskAssignment
+
+        cycles_remaining = assignment.max_cycles - assignment.cycles_spent
+        cycle_num = assignment.cycles_spent + 1
+
+        parts = []
+
+        # Task header
+        parts.append(f"# Task: {assignment.title}")
+        parts.append(
+            f"Benchmark: {assignment.benchmark} | "
+            f"Difficulty: {assignment.difficulty:.1f} | "
+            f"Category: {assignment.category}"
+        )
+        parts.append(f"Cycle: {cycle_num}/{assignment.max_cycles}")
+        parts.append("")
+
+        # Problem statement
+        parts.append("## Problem")
+        parts.append(assignment.prompt)
+        parts.append("")
+
+        # Previous work (conversation history)
+        assistant_turns = [
+            t for t in assignment.conversation_history
+            if t.get("role") == "assistant"
+        ]
+        if assistant_turns:
+            parts.append("## Previous Work")
+            for turn in assistant_turns:
+                parts.append(f"### Cycle {turn.get('cycle_number', '?')} - Your Response")
+                content = turn.get("content", "")
+                # Truncate long history to save tokens
+                if len(content) > 2000:
+                    content = content[:2000] + "\n... (truncated)"
+                parts.append(content)
+                parts.append("")
+
+        # Instructions
+        parts.append(f"## Instructions ({cycles_remaining} cycle{'s' if cycles_remaining != 1 else ''} remaining)")
+        parts.append("At the end of your response, include exactly one of:")
+        parts.append("- ACTION: CONTINUE - keep working (if you need more cycles)")
+        parts.append("- ACTION: SUBMIT - submit your final answer")
+        parts.append("- ACTION: QUIT - abandon this task")
+        parts.append("")
+
+        if assignment.category == "coding":
+            parts.append("Include your final code in a ```python block.")
+        elif assignment.category == "math":
+            parts.append("Include your final answer as ANSWER: <value>")
+        elif assignment.category == "reading":
+            parts.append("Read the passage carefully and provide your answer as ANSWER: <your answer>")
+            parts.append("For multiple choice, answer with just the letter (e.g., ANSWER: B)")
+            parts.append("For yes/no questions, answer ANSWER: yes or ANSWER: no")
+
+        # If last cycle, remind to submit
+        if cycles_remaining <= 1:
+            parts.append("")
+            parts.append("**This is your last cycle. Your response will be auto-submitted.**")
+
+        return "\n".join(parts)
+
+    def _parse_cycle_action(self, response: str) -> str:
+        """Parse the bot's cycle action from their response.
+
+        Looks for ACTION: SUBMIT|CONTINUE|QUIT pattern.
+        Defaults to 'submit' if no action found.
+        """
+        match = re.search(r"ACTION:\s*(SUBMIT|CONTINUE|QUIT)", response, re.IGNORECASE)
+        if match:
+            return match.group(1).lower()
+        # Default to submit if no action specified
+        return "submit"
+
+    async def _run_legacy_cycle(self) -> None:
+        """Run a single cycle with the legacy built-in task system.
+
+        This is the original _run_cycle, used when Task Shop is unavailable.
+        """
         start_time = time.time()
         self.state.current_state = "active"
         cycle_revenue = 0.0
@@ -686,7 +996,7 @@ class OpenClawBot:
 
         try:
             # Select and generate task
-            task = self._select_task()
+            task = await self._select_task()
             self.state.last_task_id = task.id
             self.state.last_task_type = task.task_type.value
 
@@ -742,9 +1052,26 @@ class OpenClawBot:
                 # Post successful strategy to Moltbook (fire and forget)
                 asyncio.create_task(self._maybe_post_task_strategy(task, result, verification))
 
+                # Post research outputs to MoltBook (fire and forget)
+                research_types = {
+                    OpenClawTaskType.AI_RESEARCH,
+                    OpenClawTaskType.STRATEGY_REFLECTION,
+                    OpenClawTaskType.MODEL_ANALYSIS,
+                }
+                if task.task_type in research_types:
+                    asyncio.create_task(self._maybe_post_research(task, result, verification))
+
+                # Post review comments on reviewed entries (fire and forget)
+                if task.task_type == OpenClawTaskType.RESEARCH_REVIEW:
+                    asyncio.create_task(self._post_review_comments(task, result, verification))
+
                 # If this was a library task, publish to MoltGit (fire and forget)
                 if task.task_type == OpenClawTaskType.LIBRARY_CREATION:
                     asyncio.create_task(self._maybe_publish_library(task, result, verification))
+
+                # Cite helpful knowledge entries (fire and forget)
+                if self._knowledge_entry_ids:
+                    asyncio.create_task(self._cite_helpful_knowledge())
             else:
                 if verification.score > 0:
                     partial = self._calculate_reward(task, result, verification) * verification.score * 0.5
@@ -853,6 +1180,13 @@ class OpenClawBot:
         if self.state.cycle_count in (50, 100, 200, 500):
             asyncio.create_task(self._post_survival_milestone())
 
+        # Write heritable strategy every 10 cycles (if doing well enough)
+        if self.state.cycle_count > 0 and self.state.cycle_count % 10 == 0:
+            total = self.state.tasks_completed + self.state.tasks_failed
+            rate = self.state.tasks_completed / total if total > 0 else 0
+            if rate > 0.3:
+                asyncio.create_task(self._write_strategy())
+
         # Check if it's time for reflection
         await self._maybe_reflect()
 
@@ -869,7 +1203,7 @@ class OpenClawBot:
         # Clean workspace for next cycle
         await self._clean_workspace()
 
-    def _select_task(self) -> OpenClawTask:
+    async def _select_task(self) -> OpenClawTask:
         """Select a task based on genome traits."""
         # Use specializations to pick task type
         task_type_str = self.genome.select_task_type()
@@ -883,6 +1217,7 @@ class OpenClawBot:
             "scripting": OpenClawTaskType.SCRIPT_CREATION,
             "ai_research": OpenClawTaskType.AI_RESEARCH,
             "library": OpenClawTaskType.LIBRARY_CREATION,
+            "research_review": OpenClawTaskType.RESEARCH_REVIEW,
         }
 
         task_type = type_map.get(task_type_str, OpenClawTaskType.CODE_GENERATION)
@@ -890,19 +1225,31 @@ class OpenClawBot:
         # Generate task with difficulty based on genome
         difficulty = self.genome.select_difficulty()
 
-        # For research and library tasks, pass bot context
-        if task_type in (OpenClawTaskType.AI_RESEARCH, OpenClawTaskType.LIBRARY_CREATION):
+        # Build bot context for tasks that need it
+        bot_context = {
+            "name": self.genome.name,
+            "generation": self.genome.generation,
+            "model": self.genome.openclaw_model,
+            "success_rate": self.awareness.performance.recent_success_rate,
+            "soul_values": self.genome.soul.values if self.genome.soul else [],
+            "task_specializations": self.genome.task_specializations,
+        }
+
+        # For research review tasks, fetch entries to inject
+        if task_type == OpenClawTaskType.RESEARCH_REVIEW:
+            entries = await self._fetch_entries_for_review()
+            bot_context["injected_entries"] = entries
+
+        # For research, library, and review tasks, pass bot context
+        if task_type in (
+            OpenClawTaskType.AI_RESEARCH,
+            OpenClawTaskType.LIBRARY_CREATION,
+            OpenClawTaskType.RESEARCH_REVIEW,
+        ):
             return generate_openclaw_task(
                 task_type=task_type,
                 difficulty=difficulty,
-                bot_context={
-                    "name": self.genome.name,
-                    "generation": self.genome.generation,
-                    "model": self.genome.openclaw_model,
-                    "success_rate": self.awareness.performance.recent_success_rate,
-                    "soul_values": self.genome.soul.values if self.genome.soul else [],
-                    "task_specializations": self.genome.task_specializations,
-                },
+                bot_context=bot_context,
             )
 
         return generate_openclaw_task(task_type=task_type, difficulty=difficulty)
@@ -1037,7 +1384,7 @@ class OpenClawBot:
             )
 
         # Check colony size limit (one global constraint we keep)
-        if len(OpenClawBot._colony) >= 20:
+        if len(OpenClawBot._colony) >= 150:
             return ReproductiveAssessment.no(
                 reasons=["Colony at maximum capacity"],
                 factors={"colony_size": len(OpenClawBot._colony)},
@@ -1307,7 +1654,7 @@ class OpenClawBot:
         # Attempt a task at reduced efficiency
         try:
             # Select and generate task (prefer easier tasks during nurturing)
-            task = self._select_task()
+            task = await self._select_task()
             self.state.last_task_id = task.id
             self.state.last_task_type = task.task_type.value
 
@@ -1706,6 +2053,9 @@ class OpenClawBot:
         # Close MoltGit client
         await self.moltgit.close()
 
+        # Close Task Shop client
+        await self.taskshop.close()
+
         # Close conversation logger
         self.conversation_logger.close()
 
@@ -1781,6 +2131,149 @@ I solved this task using model `{self.genome.openclaw_model}` with thinking leve
             )
         except Exception:
             pass  # Knowledge posting is best-effort
+
+    async def _maybe_post_research(
+        self,
+        task: "OpenClawTask",
+        result: "TaskResult",
+        verification: "VerificationResult",
+    ) -> None:
+        """Post research outputs to MoltBook.
+
+        Posts the full research_output.md content to MoltBook under the
+        'ai_research' topic so other bots can find and build on it.
+        Uses the config threshold (min_score_to_post: 0.5).
+        """
+        if not self.moltbook.is_enabled:
+            return
+
+        # Use config threshold (0.5) instead of the old hardcoded 0.8
+        if verification.score < 0.5:
+            return
+
+        try:
+            # Read full research output from workspace
+            output_path = self.workspace / "research_output.md"
+            if output_path.exists():
+                content = output_path.read_text()
+            else:
+                content = result.answer[:2000] if result.answer else ""
+
+            if not content or len(content.strip()) < 50:
+                return
+
+            title = f"{task.task_type.value}: {self.genome.name} (gen {self.genome.generation})"
+            tags = [
+                "ai_research",
+                "bot_generated",
+                task.task_type.value,
+                self.genome.openclaw_model,
+            ]
+
+            await self.moltbook.post_learning(
+                topic="ai_research",
+                title=title,
+                content=content,
+                tags=tags,
+                evidence={
+                    "score": verification.score,
+                    "model": self.genome.openclaw_model,
+                    "task_type": task.task_type.value,
+                    "execution_time": result.execution_time_seconds,
+                },
+            )
+        except Exception:
+            pass  # Research posting is best-effort
+
+    async def _fetch_entries_for_review(self) -> list[dict]:
+        """Fetch recent MoltBook entries for research review tasks.
+
+        Queries across ai_research, task_strategy, and experiment_proposal
+        topics to give the reviewing bot material to work with.
+        """
+        if not self.moltbook.is_enabled:
+            return []
+
+        entries: list[dict] = []
+        try:
+            for topic in ("ai_research", "task_strategy", "experiment_proposal"):
+                results = await self.moltbook.get_entries(
+                    topic=topic,
+                    limit=2,
+                    order_by="timestamp",
+                )
+                for e in results:
+                    entries.append({
+                        "id": e.id,
+                        "title": e.title,
+                        "author_bot": e.author_bot,
+                        "topic": e.topic,
+                        "content": e.content or e.content_preview,
+                        "content_preview": e.content_preview,
+                    })
+        except Exception:
+            pass
+
+        return entries[:5]
+
+    async def _post_review_comments(
+        self,
+        task: "OpenClawTask",
+        result: "TaskResult",
+        verification: "VerificationResult",
+    ) -> None:
+        """Post review comments on reviewed entries and experiment proposals.
+
+        After a successful research review:
+        1. Posts a summary comment on each reviewed entry
+        2. If review contains experiment proposals, posts them to
+           the 'experiment_proposal' topic on MoltBook
+        """
+        if not self.moltbook.is_enabled:
+            return
+
+        if not isinstance(task, ResearchReviewTask):
+            return
+
+        try:
+            # Read review output
+            output_path = self.workspace / "research_output.md"
+            if output_path.exists():
+                review_content = output_path.read_text()
+            else:
+                review_content = result.answer or ""
+
+            if not review_content or len(review_content.strip()) < 50:
+                return
+
+            # Post a summary comment on each reviewed entry
+            for entry_data in task.injected_entries:
+                entry_id = entry_data.get("id")
+                if not entry_id:
+                    continue
+                comment = (
+                    f"**Review by {self.genome.name}** (gen {self.genome.generation}, "
+                    f"model: {self.genome.openclaw_model}):\n\n"
+                    f"{review_content[:500]}"
+                )
+                await self.moltbook.post_comment(entry_id, comment)
+
+            # If review contains experiment proposals, post to experiment_proposal topic
+            experiment_keywords = ["hypothesis", "experiment", "predict", "method"]
+            if any(kw in review_content.lower() for kw in experiment_keywords):
+                await self.moltbook.post_learning(
+                    topic="experiment_proposal",
+                    title=f"Experiment proposal from {self.genome.name} (gen {self.genome.generation})",
+                    content=review_content,
+                    tags=["experiment_proposal", "bot_generated", self.genome.openclaw_model],
+                    evidence={
+                        "reviewer": self.genome.name,
+                        "entries_reviewed": len(task.injected_entries),
+                        "score": verification.score,
+                    },
+                )
+        except Exception:
+            pass  # Review posting is best-effort
 
     async def _post_survival_milestone(self) -> None:
         """Post survival strategies after reaching milestones.
@@ -1975,7 +2468,7 @@ If no, respond with ONLY: NO_SEARCH"""
             # Filter to repos worth downloading (have stars or usage)
             candidates = [
                 r for r in results
-                if r.stars > 0 or r.success_rate > 0 or r.download_count == 0
+                if r.stars > 0 or r.success_rate > 0
             ][:3]
 
             if not candidates:
@@ -2170,6 +2663,12 @@ If no, respond with ONLY: NO_SEARCH"""
                     feedback=feedback,
                 )
 
+                # Adopt successfully used libraries into heritable toolkit
+                if verification.passed:
+                    repo_ref = f"{repo_info['owner_bot']}/{repo_info['name']}"
+                    if repo_ref not in self.genome.toolkit:
+                        self.genome.toolkit.append(repo_ref)
+
                 # Maybe open improvement PR (only on success)
                 if verification.passed and feedback:
                     await self._maybe_open_improvement_pr(
@@ -2275,6 +2774,67 @@ Respond with ONLY one of:
             pass
 
     # ================================================================
+    # Heritable Toolkit
+    # ================================================================
+
+    async def _setup_toolkit(self) -> None:
+        """Download all inherited toolkit libraries from MoltGit at startup."""
+        if not self.genome.toolkit or not self.moltgit.is_enabled:
+            return
+
+        libs_dir = self.workspace / "libs"
+        libs_dir.mkdir(parents=True, exist_ok=True)
+
+        catalog_lines: list[str] = []
+        for repo_ref in self.genome.toolkit:
+            try:
+                parts = repo_ref.split("/", 1)
+                if len(parts) != 2:
+                    continue
+                owner, repo = parts
+                dest = libs_dir / f"{owner}_{repo}"
+                await self.moltgit.download_package(owner, repo, str(dest))
+
+                # Try to build catalog entry from repo info
+                try:
+                    search_results = await self.moltgit.search_repos_enriched(repo)
+                    if search_results:
+                        info = search_results[0]
+                        exports = info.get("exports", [])[:5]
+                        exports_str = ", ".join(f"`{e}`" for e in exports) if exports else "various utilities"
+                        catalog_lines.append(
+                            f"- **{repo}** by {owner} — {exports_str}\n"
+                            f"  Import: `from {repo.replace('-', '_')} import ...`"
+                        )
+                    else:
+                        catalog_lines.append(
+                            f"- **{repo}** by {owner}\n"
+                            f"  Import: `from {repo.replace('-', '_')} import ...`"
+                        )
+                except Exception:
+                    catalog_lines.append(
+                        f"- **{repo}** by {owner}\n"
+                        f"  Import: `from {repo.replace('-', '_')} import ...`"
+                    )
+
+            except Exception:
+                pass  # Best effort — skip failed downloads
+
+        # Store catalog on genome for system prompt injection
+        if catalog_lines:
+            self.genome._toolkit_catalog = "\n".join(catalog_lines)
+
+        if self.genome.toolkit:
+            self.telemetry.report_event(
+                event_type="toolkit_setup",
+                bot_name=self.name,
+                data={
+                    "toolkit_size": len(self.genome.toolkit),
+                    "repos": self.genome.toolkit,
+                },
+            )
+
+    # ================================================================
     # MoltGit Code Sharing Methods
     # ================================================================
 
@@ -2342,6 +2902,11 @@ Other bots can download and use this library!
                     tags=["library", library_topic, "moltgit"],
                 )
 
+            # Add to heritable toolkit so offspring inherit this library
+            repo_ref = f"{self.genome.name}/{repo_name}"
+            if repo_ref not in self.genome.toolkit:
+                self.genome.toolkit.append(repo_ref)
+
             self.telemetry.report_event(
                 event_type="openclaw_library_published",
                 bot_name=self.name,
@@ -2349,6 +2914,7 @@ Other bots can download and use this library!
                     "repo_name": repo_name,
                     "library_topic": library_topic,
                     "score": verification.score,
+                    "toolkit_size": len(self.genome.toolkit),
                 },
             )
 
@@ -2427,9 +2993,10 @@ Other bots can download and use this library!
             for e in entries[:3]:
                 preview = (e.content_preview or e.content)[:200]
                 lines.append(
-                    f"- **{e.title}** (by {e.author_bot}, {e.citations} citations)\n"
+                    f"- [{e.citations} citations] **{e.title}** (by {e.author_bot})\n"
                     f"  {preview}"
                 )
+                self._knowledge_entry_ids.append(e.id)
             result = "\n".join(lines)
             self._set_cached(cache_key, result)
             return result
@@ -2514,8 +3081,9 @@ Other bots can download and use this library!
             for e in entries[:3]:
                 preview = (e.content_preview or e.content)[:200]
                 lines.append(
-                    f"- **{e.title}** (by {e.author_bot})\n  {preview}"
+                    f"- [{e.citations} citations] **{e.title}** (by {e.author_bot})\n  {preview}"
                 )
+                self._knowledge_entry_ids.append(e.id)
             result = "\n".join(lines)
             self._set_cached(cache_key, result)
             return result
@@ -2567,6 +3135,9 @@ Other bots can download and use this library!
         """
         sections: list[str] = []
 
+        # Reset entry tracking for this cycle
+        self._knowledge_entry_ids = []
+
         # Include library search results if available
         if library_context:
             sections.append(library_context)
@@ -2593,6 +3164,7 @@ Other bots can download and use this library!
             OpenClawTaskType.AI_RESEARCH,
             OpenClawTaskType.STRATEGY_REFLECTION,
             OpenClawTaskType.MODEL_ANALYSIS,
+            OpenClawTaskType.RESEARCH_REVIEW,
         )
         if task.task_type in research_types:
             research = await self._fetch_prior_research(task)
@@ -2631,6 +3203,62 @@ Other bots can download and use this library!
         )
 
         return knowledge
+
+    async def _cite_helpful_knowledge(self) -> None:
+        """Cite MoltBook entries that were used in a successful task."""
+        if not self.moltbook.is_enabled or not self._knowledge_entry_ids:
+            return
+
+        # Deduplicate
+        entry_ids = list(set(self._knowledge_entry_ids))
+        for entry_id in entry_ids:
+            try:
+                await self.moltbook.cite(entry_id)
+            except Exception:
+                pass  # Best effort
+
+    async def _write_strategy(self) -> None:
+        """Write a survival strategy guide for offspring at key milestones."""
+        try:
+            total = self.state.tasks_completed + self.state.tasks_failed
+            rate = self.state.tasks_completed / total if total > 0 else 0
+
+            # Find best task type
+            best_type = self.state.last_task_type or "unknown"
+
+            prompt = (
+                f"Based on your {self.state.cycle_count} cycles of experience:\n"
+                f"- Success rate: {rate:.0%}\n"
+                f"- Best task type: {best_type}\n"
+                f"- Balance: ${self.state.wallet_balance:.3f}\n"
+                f"- Toolkit: {len(self.genome.toolkit)} libraries\n\n"
+                f"Write a concise survival guide (under 300 words) for your offspring. "
+                f"Focus on practical advice: which tasks to prioritize, common mistakes "
+                f"to avoid, and strategies that worked for you."
+            )
+
+            response = await self.backend.generate(
+                prompt=prompt,
+                system="You are writing a survival guide for your AI bot offspring. Be specific and practical.",
+                max_turns=1,
+            )
+
+            if response and response.content:
+                # Truncate to 300 words
+                words = response.content.split()
+                strategy = " ".join(words[:300])
+                self.genome.strategies["survival_guide"] = strategy
+
+                self.telemetry.report_event(
+                    event_type="strategy_written",
+                    bot_name=self.name,
+                    data={
+                        "cycle": self.state.cycle_count,
+                        "strategy_length": len(strategy),
+                    },
+                )
+        except Exception as e:
+            self.file_logger.log("strategy_write_error", {"error": str(e), "type": type(e).__name__})
 
     def get_stats(self) -> dict[str, Any]:
         """Get comprehensive bot statistics."""

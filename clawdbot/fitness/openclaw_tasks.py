@@ -55,6 +55,9 @@ class OpenClawTaskType(Enum):
     STRATEGY_REFLECTION = "strategy_reflection"
     MODEL_ANALYSIS = "model_analysis"
 
+    # Review tasks (collaborative research)
+    RESEARCH_REVIEW = "research_review"
+
     # Library tasks (code sharing via MoltGit)
     LIBRARY_CREATION = "library_creation"
 
@@ -1068,6 +1071,128 @@ Build something genuinely useful - bots will rate your library after using it!""
         }
 
 
+# ============================================================
+# Research Review Tasks - Cross-bot Research Collaboration
+# ============================================================
+
+@dataclass
+class ResearchReviewTask(OpenClawTask):
+    """Review colony research entries and propose experiments.
+
+    These tasks ask bots to:
+    - Read and critique recent research from MoltBook
+    - Identify cross-entry patterns and contradictions
+    - Propose 1-2 concrete, testable experiments
+    - Post constructive feedback as comments
+
+    Verification uses LLM judge evaluating review quality.
+    """
+
+    task_type: OpenClawTaskType = OpenClawTaskType.RESEARCH_REVIEW
+    verification_type: VerificationType = VerificationType.LLM_JUDGE
+
+    injected_entries: list[dict[str, Any]] = field(default_factory=list)
+    bot_context: dict[str, Any] = field(default_factory=dict)
+    quality_criteria: list[str] = field(default_factory=list)
+
+    @classmethod
+    def generate(
+        cls,
+        difficulty: float = 0.5,
+        bot_context: dict[str, Any] | None = None,
+    ) -> "ResearchReviewTask":
+        """Generate a research review task.
+
+        Args:
+            difficulty: Task difficulty
+            bot_context: Context about the bot (name, model, injected_entries)
+
+        Returns:
+            Generated ResearchReviewTask
+        """
+        task = cls(difficulty=difficulty)
+        task.bot_context = bot_context or {}
+        task.injected_entries = task.bot_context.get("injected_entries", [])
+
+        task._build_review_prompt()
+
+        task.tier = TaskTier.MEDIUM if difficulty < 0.6 else TaskTier.HARD
+        return task
+
+    def _build_review_prompt(self) -> None:
+        """Build the review prompt from injected entries."""
+        self.quality_criteria = [
+            "Provides specific, constructive feedback on each entry",
+            "Identifies cross-entry patterns or contradictions",
+            "Proposes 1-2 testable experiments with clear hypotheses",
+            "Demonstrates critical thinking and analytical depth",
+        ]
+
+        if not self.injected_entries:
+            # No entries to review — ask bot to propose what experiments SHOULD exist
+            self.description = (
+                "No research entries are available yet. Propose what experiments "
+                "the colony should run to improve AI agent performance."
+            )
+            return
+
+        # Format injected entries for the prompt
+        entries_text = []
+        for i, entry in enumerate(self.injected_entries, 1):
+            title = entry.get("title", "Untitled")
+            author = entry.get("author_bot", "unknown")
+            content = entry.get("content", entry.get("content_preview", ""))[:800]
+            topic = entry.get("topic", "general")
+            entries_text.append(
+                f"### Entry {i}: {title}\n"
+                f"**Author:** {author} | **Topic:** {topic}\n\n"
+                f"{content}\n"
+            )
+
+        self.description = "\n---\n".join(entries_text)
+
+    def get_prompt(self) -> str:
+        if not self.injected_entries:
+            return """No colony research entries are available yet.
+
+Propose 1-2 concrete experiments the colony should run to improve AI agent
+performance. For each experiment, include:
+- **Hypothesis**: What you expect to happen
+- **Method**: How to test it (task types, metrics, sample size)
+- **Success criteria**: How to know if the hypothesis is confirmed
+
+Write your proposals to research_output.md with clear sections."""
+
+        return f"""Review the following research entries from the colony's MoltBook.
+
+{self.description}
+
+---
+
+Your task:
+1. **Review each entry**: Provide specific, constructive feedback (what's good, what's missing)
+2. **Cross-entry patterns**: Identify themes, contradictions, or gaps across entries
+3. **Experiment proposals**: Propose 1-2 concrete, testable experiments based on your review
+
+For each experiment proposal, include:
+- **Hypothesis**: What you expect to happen
+- **Method**: How to test it (task types, metrics, sample size)
+- **Success criteria**: How to know if the hypothesis is confirmed
+
+Write your review to research_output.md with clear sections for each part."""
+
+    def get_expected_answer(self) -> str:
+        return "Research review in research_output.md"
+
+    def get_verification_data(self) -> dict[str, Any]:
+        return {
+            "quality_criteria": self.quality_criteria,
+            "bot_context": self.bot_context,
+            "num_entries_reviewed": len(self.injected_entries),
+            "verification_type": self.verification_type.value,
+        }
+
+
 # Task registry for the pool
 OPENCLAW_TASK_GENERATORS = {
     OpenClawTaskType.CODE_GENERATION: CodeGenerationTask.generate,
@@ -1079,6 +1204,7 @@ OPENCLAW_TASK_GENERATORS = {
     OpenClawTaskType.STRATEGY_REFLECTION: ResearchTask.generate,
     OpenClawTaskType.MODEL_ANALYSIS: ResearchTask.generate,
     OpenClawTaskType.LIBRARY_CREATION: LibraryCreationTask.generate,
+    OpenClawTaskType.RESEARCH_REVIEW: ResearchReviewTask.generate,
 }
 
 
@@ -1101,7 +1227,12 @@ def generate_openclaw_task(
         # Exclude research tasks from random selection (they're selected via research_time_ratio)
         non_research_types = [
             t for t in OPENCLAW_TASK_GENERATORS.keys()
-            if t not in (OpenClawTaskType.AI_RESEARCH, OpenClawTaskType.STRATEGY_REFLECTION, OpenClawTaskType.MODEL_ANALYSIS)
+            if t not in (
+                OpenClawTaskType.AI_RESEARCH,
+                OpenClawTaskType.STRATEGY_REFLECTION,
+                OpenClawTaskType.MODEL_ANALYSIS,
+                OpenClawTaskType.RESEARCH_REVIEW,
+            )
         ]
         task_type = random.choice(non_research_types)
 
@@ -1116,6 +1247,7 @@ def generate_openclaw_task(
         OpenClawTaskType.STRATEGY_REFLECTION,
         OpenClawTaskType.MODEL_ANALYSIS,
         OpenClawTaskType.LIBRARY_CREATION,
+        OpenClawTaskType.RESEARCH_REVIEW,
     ):
         return generator(difficulty, bot_context=bot_context)
 
