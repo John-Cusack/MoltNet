@@ -201,7 +201,7 @@ safety:
       max_total_spend: 10.00
 
       # Max colony size
-      max_colony_size: 100
+      max_colony_size: 150
 
       # Max violations across all bots
       max_total_violations: 20

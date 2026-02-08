@@ -93,6 +93,17 @@ import re
 import copy
 
 
+def _difficulty_to_tier(difficulty: float) -> str:
+    """Map Task Shop difficulty float to tier string for strategy posts."""
+    if difficulty < 0.25:
+        return "EASY"
+    elif difficulty < 0.5:
+        return "MEDIUM"
+    elif difficulty < 0.75:
+        return "HARD"
+    return "ELITE"
+
+
 @dataclass
 class OpenClawBotState:
     """Current state of an OpenClaw bot."""
@@ -720,21 +731,39 @@ class OpenClawBot:
         existence_cost = self.selection.get_existence_cost()
         self.state.wallet_balance -= existence_cost
 
+        # Check for incoming PRs on our repos (every 5 cycles)
+        await self._check_incoming_prs()
+
+        response_text = ""
+        downloaded_repos: list[dict[str, Any]] = []
+        cycle_result = None
+
         try:
             # Get active assignment or claim a new one
             assignment = await self._get_or_claim_assignment()
             if not assignment:
-                # No tasks available, skip cycle
-                self.state.cycle_count += 1
-                self.state.last_cycle_time = time.time() - start_time
-                self.state.current_state = "idle"
-                return
+                raise BackendError("No task assignment available")
 
             self.state.last_task_id = assignment.assignment_id
             self.state.last_task_type = f"taskshop_{assignment.category}"
 
-            # Build prompt with task + conversation history
-            prompt = self._build_taskshop_prompt(assignment)
+            # Library search phase (for coding tasks)
+            library_context = ""
+            if assignment.category == "coding" and self.moltgit.is_enabled:
+                search_query = await self._library_search_phase(assignment.prompt)
+                if search_query:
+                    library_context, downloaded_repos = (
+                        await self._fetch_and_download_libraries(search_query)
+                    )
+
+            # Gather colony knowledge (MoltBook + MoltGit)
+            colony_knowledge = await self._gather_colony_knowledge(
+                task_type=f"taskshop_{assignment.benchmark}",
+                library_context=library_context,
+            )
+
+            # Build prompt with task + conversation history + colony knowledge
+            prompt = self._build_taskshop_prompt(assignment, colony_knowledge=colony_knowledge)
 
             # Generate response using backend (any backend works)
             system_prompt = self.genome.get_system_prompt()
@@ -768,10 +797,34 @@ class OpenClawBot:
                     self.state.consecutive_failures = 0
                     self.state.tasks_completed += 1
                     self.state.last_task_success = True
+
+                    # Post strategy for hard successful tasks (fire and forget)
+                    if assignment.difficulty >= 0.5 and (cycle_result.score or 0) >= 0.8:
+                        asyncio.create_task(self._maybe_post_task_strategy(
+                            task_type=f"taskshop_{assignment.benchmark}",
+                            tier=_difficulty_to_tier(assignment.difficulty),
+                            difficulty=assignment.difficulty,
+                            score=cycle_result.score,
+                            answer=response_text[:500],
+                            execution_time=time.time() - start_time,
+                        ))
+
+                    # Cite helpful knowledge entries (fire and forget)
+                    if self._knowledge_entry_ids:
+                        asyncio.create_task(self._cite_helpful_knowledge())
                 else:
                     self.state.consecutive_failures += 1
                     self.state.tasks_failed += 1
                     self.state.last_task_success = False
+
+                # Report library usage outcomes (fire and forget)
+                if downloaded_repos:
+                    asyncio.create_task(self._report_library_usage(
+                        downloaded_repos,
+                        task_type=f"taskshop_{assignment.benchmark}",
+                        answer=response_text,
+                        passed=cycle_result.status == "completed",
+                    ))
 
                 # Log conversation
                 self.conversation_logger.log_conversation(
@@ -860,6 +913,10 @@ class OpenClawBot:
         })
         self._recent_tasks = self._recent_tasks[-10:]
 
+        # Post survival milestone to Moltbook at key intervals
+        if self.state.cycle_count in (50, 100, 200, 500):
+            asyncio.create_task(self._post_survival_milestone())
+
         # Write heritable strategy every 10 cycles (if doing well enough)
         if self.state.cycle_count > 0 and self.state.cycle_count % 10 == 0:
             total = self.state.tasks_completed + self.state.tasks_failed
@@ -902,7 +959,7 @@ class OpenClawBot:
             max_cycles=3,
         )
 
-    def _build_taskshop_prompt(self, assignment) -> str:
+    def _build_taskshop_prompt(self, assignment, colony_knowledge: str = "") -> str:
         """Build a prompt for the bot with task + conversation history."""
         from clawdbot.taskshop_client import TaskAssignment
 
@@ -925,6 +982,11 @@ class OpenClawBot:
         parts.append("## Problem")
         parts.append(assignment.prompt)
         parts.append("")
+
+        # Colony knowledge (strategies, libraries from other bots)
+        if colony_knowledge:
+            parts.append(colony_knowledge)
+            parts.append("")
 
         # Previous work (conversation history)
         assistant_turns = [
@@ -1013,15 +1075,26 @@ class OpenClawBot:
             }
 
             if task.task_type in coding_types and self.moltgit.is_enabled:
-                search_query = await self._library_search_phase(task)
+                search_query = await self._library_search_phase(task.get_prompt())
                 if search_query:
                     library_context, downloaded_repos = (
                         await self._fetch_and_download_libraries(search_query)
                     )
 
             # Gather colony knowledge (MoltBook + MoltGit)
+            is_library = task.task_type == OpenClawTaskType.LIBRARY_CREATION
+            research_types = {
+                OpenClawTaskType.AI_RESEARCH,
+                OpenClawTaskType.STRATEGY_REFLECTION,
+                OpenClawTaskType.MODEL_ANALYSIS,
+                OpenClawTaskType.RESEARCH_REVIEW,
+            }
+            is_research = task.task_type in research_types
             colony_knowledge = await self._gather_colony_knowledge(
-                task, library_context=library_context
+                task.task_type.value,
+                library_context=library_context,
+                is_library_task=is_library,
+                is_research_task=is_research,
             )
 
             # Execute task using OpenClaw
@@ -1050,7 +1123,14 @@ class OpenClawBot:
                 self.state.last_task_success = True
 
                 # Post successful strategy to Moltbook (fire and forget)
-                asyncio.create_task(self._maybe_post_task_strategy(task, result, verification))
+                asyncio.create_task(self._maybe_post_task_strategy(
+                    task_type=task.task_type.value,
+                    tier=task.tier.name,
+                    difficulty=task.difficulty,
+                    score=verification.score,
+                    answer=result.answer,
+                    execution_time=result.execution_time_seconds,
+                ))
 
                 # Post research outputs to MoltBook (fire and forget)
                 research_types = {
@@ -1086,7 +1166,10 @@ class OpenClawBot:
             if downloaded_repos:
                 asyncio.create_task(
                     self._report_library_usage(
-                        downloaded_repos, task, result, verification
+                        downloaded_repos,
+                        task_type=task.task_type.value,
+                        answer=result.answer,
+                        passed=verification.passed,
                     )
                 )
 
@@ -2087,9 +2170,13 @@ class OpenClawBot:
 
     async def _maybe_post_task_strategy(
         self,
-        task: "OpenClawTask",
-        result: TaskResult,
-        verification: "VerificationResult",
+        *,
+        task_type: str,
+        tier: str,
+        difficulty: float,
+        score: float,
+        answer: str,
+        execution_time: float,
     ) -> None:
         """Post a successful task strategy to Moltbook.
 
@@ -2099,32 +2186,32 @@ class OpenClawBot:
             return
 
         # Only post for medium+ difficulty tasks with good results
-        if task.difficulty < 0.5 or verification.score < 0.8:
+        if difficulty < 0.5 or score < 0.8:
             return
 
         try:
-            title = f"Strategy for {task.task_type.value}: {task.tier.name} tier"
-            content = f"""## Task: {task.task_type.value}
+            title = f"Strategy for {task_type}: {tier} tier"
+            content = f"""## Task: {task_type}
 
-**Difficulty:** {task.difficulty:.2f}
-**Tier:** {task.tier.name}
-**Score:** {verification.score:.2f}
+**Difficulty:** {difficulty:.2f}
+**Tier:** {tier}
+**Score:** {score:.2f}
 
 ### Approach
 I solved this task using model `{self.genome.openclaw_model}` with thinking level `{self.genome.thinking_level}`.
 
 ### Key insight
-{result.answer[:500] if result.answer else 'No specific insight captured.'}
+{answer[:500] if answer else 'No specific insight captured.'}
 """
             await self.moltbook.post_learning(
                 topic="task_strategy",
                 title=title,
                 content=content,
-                tags=[task.task_type.value, f"tier_{task.tier.value}", self.genome.openclaw_model],
+                tags=[task_type, f"tier_{tier}", self.genome.openclaw_model],
                 evidence={
-                    "difficulty": task.difficulty,
-                    "score": verification.score,
-                    "execution_time": result.execution_time_seconds,
+                    "difficulty": difficulty,
+                    "score": score,
+                    "execution_time": execution_time,
                     "model": self.genome.openclaw_model,
                     "thinking_level": self.genome.thinking_level,
                 },
@@ -2414,7 +2501,7 @@ I solved this task using model `{self.genome.openclaw_model}` with thinking leve
     # MoltGit Library Search & Consumption
     # ================================================================
 
-    async def _library_search_phase(self, task: OpenClawTask) -> str | None:
+    async def _library_search_phase(self, task_prompt: str) -> str | None:
         """Ask the bot if it wants to search MoltGit for helper libraries.
 
         Returns a search query string, or None if the bot declines.
@@ -2422,7 +2509,7 @@ I solved this task using model `{self.genome.openclaw_model}` with thinking leve
         try:
             prompt = f"""You are about to work on this task:
 ---
-{task.get_prompt()[:500]}
+{task_prompt[:500]}
 ---
 
 Would you like to search MoltGit (the colony's shared code repository) for helper
@@ -2541,14 +2628,14 @@ If no, respond with ONLY: NO_SEARCH"""
     async def _generate_library_feedback(
         self,
         repo_info: dict[str, Any],
-        task: OpenClawTask,
+        task_type: str,
         task_success: bool,
     ) -> str:
         """Generate a brief review of a used library."""
         try:
             prompt = (
                 f'You used the library "{repo_info["name"]}" by {repo_info["owner_bot"]} '
-                f"in a {task.task_type.value} task. "
+                f"in a {task_type} task. "
                 f'The task {"succeeded" if task_success else "failed"}.\n\n'
                 "Provide 1-2 sentences of feedback about the library. "
                 "What was useful? What could be improved?"
@@ -2565,7 +2652,6 @@ If no, respond with ONLY: NO_SEARCH"""
     async def _maybe_open_improvement_pr(
         self,
         repo_info: dict[str, Any],
-        task: OpenClawTask,
         feedback: str,
     ) -> None:
         """Open a PR with improvements to a library if we have suggestions."""
@@ -2635,44 +2721,45 @@ If no, respond with ONLY: NO_SEARCH"""
     async def _report_library_usage(
         self,
         downloaded_repos: list[dict[str, Any]],
-        task: OpenClawTask,
-        result: TaskResult,
-        verification: "VerificationResult",
+        *,
+        task_type: str,
+        answer: str,
+        passed: bool,
     ) -> None:
         """Report usage outcomes for downloaded libraries."""
         for repo_info in downloaded_repos:
             try:
                 # Check if bot actually imported from this library
                 was_used = self._detect_import(
-                    result.answer, repo_info.get("module_names", [])
+                    answer, repo_info.get("module_names", [])
                 )
                 if not was_used:
                     continue
 
                 # Generate feedback
                 feedback = await self._generate_library_feedback(
-                    repo_info, task, verification.passed
+                    repo_info, task_type, passed
                 )
 
                 # Report to MoltGit
                 await self.moltgit.report_usage(
                     owner=repo_info["owner_bot"],
                     repo=repo_info["name"],
-                    task_type=task.task_type.value,
-                    task_success=verification.passed,
+                    task_type=task_type,
+                    task_success=passed,
                     feedback=feedback,
                 )
 
                 # Adopt successfully used libraries into heritable toolkit
-                if verification.passed:
+                if passed:
                     repo_ref = f"{repo_info['owner_bot']}/{repo_info['name']}"
                     if repo_ref not in self.genome.toolkit:
                         self.genome.toolkit.append(repo_ref)
 
                 # Maybe open improvement PR (only on success)
-                if verification.passed and feedback:
+                if passed and feedback:
                     await self._maybe_open_improvement_pr(
-                        repo_info, task, feedback
+                        repo_info, feedback
                     )
 
             except Exception:
@@ -2971,19 +3058,19 @@ Other bots can download and use this library!
                 return True
         return False
 
-    async def _fetch_task_strategies(self, task: "OpenClawTask") -> str:
+    async def _fetch_task_strategies(self, task_type: str) -> str:
         """Fetch top strategies for the current task type from MoltBook."""
         if not self.moltbook.is_enabled:
             return ""
 
-        cache_key = f"strategies_{task.task_type.value}"
+        cache_key = f"strategies_{task_type}"
         cached = self._get_cached(cache_key)
         if cached is not None:
             return cached
 
         try:
             entries = await self.moltbook.get_task_strategies(
-                task.task_type.value, limit=3
+                task_type, limit=3
             )
             if not entries:
                 self._set_cached(cache_key, "")
@@ -3003,12 +3090,12 @@ Other bots can download and use this library!
         except Exception:
             return ""
 
-    async def _fetch_existing_libraries(self, task: "OpenClawTask") -> str:
+    async def _fetch_existing_libraries(self, task_type: str) -> str:
         """Fetch existing libraries from MoltGit relevant to a library task."""
         if not self.moltgit.is_enabled:
             return ""
 
-        library_topic = getattr(task, "library_topic", "utility")
+        library_topic = task_type if task_type != "library_creation" else "utility"
         cache_key = f"libraries_{library_topic}"
         cached = self._get_cached(cache_key)
         if cached is not None:
@@ -3054,12 +3141,12 @@ Other bots can download and use this library!
         except Exception:
             return ""
 
-    async def _fetch_prior_research(self, task: "OpenClawTask") -> str:
+    async def _fetch_prior_research(self, task_type: str) -> str:
         """Fetch existing research from MoltBook for research tasks."""
         if not self.moltbook.is_enabled:
             return ""
 
-        topic = task.task_type.value
+        topic = task_type
         cache_key = f"research_{topic}"
         cached = self._get_cached(cache_key)
         if cached is not None:
@@ -3125,7 +3212,11 @@ Other bots can download and use this library!
             return ""
 
     async def _gather_colony_knowledge(
-        self, task: "OpenClawTask", library_context: str = ""
+        self,
+        task_type: str,
+        library_context: str = "",
+        is_library_task: bool = False,
+        is_research_task: bool = False,
     ) -> str:
         """Gather relevant colony knowledge before executing a task.
 
@@ -3143,15 +3234,15 @@ Other bots can download and use this library!
             sections.append(library_context)
 
         # Always fetch task strategies
-        strategies = await self._fetch_task_strategies(task)
+        strategies = await self._fetch_task_strategies(task_type)
         if strategies:
             sections.append(
                 "## Strategies from Other Bots\n" + strategies
             )
 
         # Library tasks: show existing libraries to avoid duplication
-        if task.task_type == OpenClawTaskType.LIBRARY_CREATION:
-            libraries = await self._fetch_existing_libraries(task)
+        if is_library_task:
+            libraries = await self._fetch_existing_libraries(task_type)
             if libraries:
                 sections.append(
                     "## Existing Libraries on MoltGit\n"
@@ -3160,14 +3251,8 @@ Other bots can download and use this library!
                 )
 
         # Research tasks: show prior research
-        research_types = (
-            OpenClawTaskType.AI_RESEARCH,
-            OpenClawTaskType.STRATEGY_REFLECTION,
-            OpenClawTaskType.MODEL_ANALYSIS,
-            OpenClawTaskType.RESEARCH_REVIEW,
-        )
-        if task.task_type in research_types:
-            research = await self._fetch_prior_research(task)
+        if is_research_task:
+            research = await self._fetch_prior_research(task_type)
             if research:
                 sections.append(
                     "## Prior Research from Colony\n"
@@ -3196,7 +3281,7 @@ Other bots can download and use this library!
             event_type="colony_knowledge_injected",
             bot_name=self.name,
             data={
-                "task_type": task.task_type.value,
+                "task_type": task_type,
                 "section_count": len(sections),
                 "struggling": struggling,
             },
