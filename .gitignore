@@ -207,3 +207,17 @@ marimo/_lsp/
 __marimo__/
 /.claude/
 /runs/
+
+# MoltNet runtime artifacts
+*.db
+*.db-wal
+*.db-shm
+/data/
+/workspaces/
+/logs/
+/.pids/
+/output.json
+/answer.txt
+
+# JetBrains IDE
+/.idea/
