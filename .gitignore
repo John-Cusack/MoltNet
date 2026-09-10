@@ -221,3 +221,18 @@ __marimo__/
 
 # JetBrains IDE
 /.idea/
+
+# ---- ColonyOS + experiments (this branch) ----
+colonyos/.venv/
+colonyos/.run/
+__pycache__/
+*.pyc
+experiments/**/.run/
+# Upstream benchmark clone (89MB; recreate with:
+#   git clone --depth 1 https://github.com/princeton-nlp/intercode.git
+#     experiments/ctf_colony/intercode
+#   cd experiments/ctf_colony/intercode
+#   sed 's/ netcat / netcat-openbsd /; s/RUN pip3 install pycryptodome/RUN pip3 install --break-system-packages pycryptodome/' \
+#     docker/ctf.Dockerfile > docker/ctf_local2.Dockerfile
+#   docker build -t intercode-ctf -f docker/ctf_local2.Dockerfile .
+experiments/ctf_colony/intercode/
