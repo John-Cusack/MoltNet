@@ -23,6 +23,9 @@ dev = [
 benchmarks = [
     "datasets>=2.14.0",
 ]
+plots = [
+    "matplotlib>=3.11.1",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -35,6 +38,7 @@ packages = ["clawdbot", "observatory", "analyzer", "taskshop"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
