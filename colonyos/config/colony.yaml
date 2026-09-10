@@ -1,0 +1,23 @@
+colony:
+  name: moltnet-prototype
+  max_bots: 5
+  heartbeat_interval_seconds: 30
+
+# Model routes are pinned HERE ONLY (DESIGN.md §10.2 exfiltration chokepoint).
+# Bots reference these by key; per-bot URL overrides are refused by config.py.
+models:
+  glm-flash:
+    url: http://localhost:8080
+    api_key_env: GLM_KEY
+    cost_per_1k_input: 0.02
+    cost_per_1k_output: 0.06
+  claude-sonnet:
+    url: http://localhost:8081
+    api_key_env: CLAUDE_KEY
+    cost_per_1k_input: 0.015
+    cost_per_1k_output: 0.075
+
+leases:
+  default_initial_tokens: 50000
+  topup_on_task_complete: 20000
+  expiry_hours: 24
