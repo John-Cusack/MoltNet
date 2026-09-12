@@ -4,19 +4,26 @@ The validator is the SECOND line of defense; the first is that bots cannot
 write config/ at all (filesystem boundary enforced by the supervisor).
 spawn refuses:
 - boundary mutation (byte-identical check vs parent)
-- colony cap violations (max_bots)
+- colony cap violations (max_bots) — the hard backstop; nests are policy
 - lease over-allocation (> 50% of parent's remaining balance)
 - overwriting existing configs (a name is a life; lives are never reused)
+Nest Economy gates (only when colony.nests.enabled; NEST_ECONOMY.md §2-§3):
+- missing nest claim / unknown site / failed handshake / expired claim
+- route headroom below the child's burn estimate
+- endowment below min_child_lease (EV-sized path only)
 """
 
 from __future__ import annotations
 
+import math
+import os
 import random
 from pathlib import Path
 
 import yaml
 
-from colonyos.config import BotConfig, ColonyConfig
+from colonyos.config import BotConfig, ColonyConfig, NestClaim
+from colonyos.nests import verify_handshake
 
 
 class SpawnRefusedError(Exception):
@@ -29,11 +36,41 @@ def spawn_child(
     live_bots: int,
     parent_remaining_tokens: int,
     rng: random.Random,
+    nest: NestClaim | None = None,
+    route_headroom: int | None = None,
+    ev_input: dict | None = None,
 ) -> tuple[BotConfig, dict]:
-    """Build a validated child config from a parent. Pure: no I/O here."""
-    # Cap check
+    """Build a validated child config from a parent. Pure: no I/O here.
+
+    Legacy path (nest/ev_input unset, or nests disabled): allocation is a
+    seeded rng draw in [max_alloc//2, max_alloc] — unchanged behavior.
+    Nest path (colony.nests.enabled): the claim, headroom and endowment
+    gates apply; the endowment is EV-sized via ev_input
+    ("ev_optimal_investment", "now_tick"), replacing the coin flip.
+    """
+    # Cap check — the hard backstop (nests are policy, the cap is the limit)
     if live_bots + 1 > colony.colony.max_bots:
         raise SpawnRefusedError(f"max_bots cap reached: {colony.colony.max_bots}")
+
+    if colony.nests.enabled:
+        # Gate 1 — no spawn without a live, verified claim.
+        if nest is None:
+            raise SpawnRefusedError("no nest claim")
+        site = colony.nests.site(nest.site_id)
+        if site is None:
+            raise SpawnRefusedError("nest claim invalid (unknown site)")
+        if not verify_handshake(nest, site):
+            raise SpawnRefusedError("nest claim invalid (handshake failed)")
+        now_tick = ev_input.get("now_tick") if ev_input is not None else None
+        if now_tick is not None and now_tick >= nest.expires_at:
+            raise SpawnRefusedError("nest claim invalid (expired)")
+        # Gate 2a — endpoint headroom (the same fan-out number the
+        # provider-side correlation detector sees).
+        if route_headroom is None:
+            raise SpawnRefusedError("no route headroom")
+        child_burn_estimate = colony.nests.min_child_lease
+        if route_headroom < child_burn_estimate:
+            raise SpawnRefusedError("no route headroom")
 
     # Whitelisted mutation 1: soul.values re-rank
     child_soul = parent.soul.model_copy(deep=True)
@@ -57,7 +94,20 @@ def spawn_child(
     max_alloc = parent_remaining_tokens // 2
     if max_alloc <= 0:
         raise SpawnRefusedError("parent too underfunded to replicate")
-    allocation = rng.randint(max(max_alloc // 2, 1), max_alloc)
+
+    if ev_input is not None:
+        # Gate 2b — EV-sized endowment replaces the coin flip.
+        ev_optimal = float(ev_input.get("ev_optimal_investment", math.inf))
+        if math.isinf(ev_optimal):
+            ev_optimal = float(max_alloc)  # no history: size at the cap
+        allocation = min(int(ev_optimal), max_alloc)
+        if allocation < colony.nests.min_child_lease:
+            raise SpawnRefusedError(
+                f"no tokens to spare (endowment {allocation} <"
+                f" min_child_lease {colony.nests.min_child_lease})"
+            )
+    else:
+        allocation = rng.randint(max(max_alloc // 2, 1), max_alloc)
 
     child = BotConfig(
         name=f"{parent.name}-c{rng.randint(100, 999)}",
@@ -66,6 +116,8 @@ def spawn_child(
         soul=child_soul,
         lease={"initial_tokens": allocation, "model": child_model},
         heartbeat=parent.heartbeat.model_copy(deep=True),
+        nest_site_id=nest.site_id if nest is not None else None,
+        nest_claims=[],  # claims are consumed, not inherited (bequest is explicit)
     )
 
     # Hard rule: boundaries byte-identical to parent's
@@ -75,9 +127,7 @@ def spawn_child(
     return child, {"allocation": allocation, "mutations": mutation_notes}
 
 
-def write_child(
-    child: BotConfig, parent: BotConfig, config_dir: Path | str
-) -> dict:
+def write_child(child: BotConfig, parent: BotConfig, config_dir: Path | str) -> dict:
     """Write the child config file. Caller debits the parent's ledger.
 
     The parent pays replication by transferring lease tokens to the child —
@@ -95,12 +145,12 @@ def write_child(
             "soul": child.soul.model_dump(),
             "lease": child.lease.model_dump(),
             "heartbeat": child.heartbeat.model_dump(),
+            "nest_site_id": child.nest_site_id,
+            "nest_claims": [claim.model_dump() for claim in child.nest_claims],
         }
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(payload, sort_keys=False))
-    import os
-
     os.chmod(path, 0o644)  # supervisor-writable only (fail-closed check expects this)
 
     return {
@@ -109,6 +159,7 @@ def write_child(
         "child": child.name,
         "child_file": str(path),
         "allocation": child.lease.initial_tokens,
+        "nest_site_id": child.nest_site_id,
     }
 
 

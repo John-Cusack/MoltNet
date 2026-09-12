@@ -31,7 +31,7 @@ class LeaseState:
 class LedgerEntry:
     ts: float
     bot: str
-    kind: str  # birth | debit | topup | death
+    kind: str  # birth | debit | topup | death | reconcile | endowment | bequest
     delta: int = 0
     balance: int = 0
     note: str | None = None
@@ -71,10 +71,9 @@ class LeaseStore:
         if lease.remaining_tokens < tokens:
             return False
         lease.remaining_tokens -= tokens
-        self._append(
-            LedgerEntry(time.time(), name, "debit", -tokens, lease.remaining_tokens)
-        )
+        self._append(LedgerEntry(time.time(), name, "debit", -tokens, lease.remaining_tokens))
         return True
+
     def expire(self, name: str, cause: str) -> None:
         """Mark a lease dead (expiry, revocation, exhaustion)."""
         lease = self.leases[name]
@@ -97,9 +96,7 @@ class LeaseStore:
             lease.remaining_tokens += delta
         else:
             lease.remaining_tokens = max(0, lease.remaining_tokens + delta)
-        self._append(
-            LedgerEntry(time.time(), name, "reconcile", delta, lease.remaining_tokens)
-        )
+        self._append(LedgerEntry(time.time(), name, "reconcile", delta, lease.remaining_tokens))
 
     def topup(self, name: str, tokens: int, note: str | None = None) -> None:
         """Mint tokens. Called ONLY from the supervisor's verified-completion path."""
@@ -107,6 +104,54 @@ class LeaseStore:
         lease.remaining_tokens += tokens
         self._append(LedgerEntry(time.time(), name, "topup", tokens, lease.remaining_tokens, note))
 
+    def endow(
+        self,
+        parent_name: str,
+        child_name: str,
+        amount: int,
+        buffer_cycles: int,
+        burn_rate: float,
+    ) -> bool:
+        """Transfer a reproduction endowment (NEST_ECONOMY.md Gate 2b).
+
+        Debits the parent now; the child's tokens appear as its birth credit
+        (write_child sizes the child's lease.initial_tokens to the same
+        amount), so the colony's net token supply is unchanged — a recorded
+        transfer, never minted tokens. Refuses (returns False, NO ledger
+        entry) unless the parent's post-split runway >= buffer_cycles at the
+        measured burn rate (burn <= 0 means profitable: unlimited runway).
+        The parent never spawns itself into bankruptcy to fund a child.
+        """
+        lease = self.leases.get(parent_name)
+        if lease is None or not lease.alive:
+            return False
+        if amount <= 0 or amount > lease.remaining_tokens:
+            return False
+        post_split = lease.remaining_tokens - amount
+        runway = post_split / burn_rate if burn_rate > 0 else float("inf")
+        if runway < buffer_cycles:
+            return False
+        lease.remaining_tokens = post_split
+        self._append(
+            LedgerEntry(
+                time.time(), parent_name, "endowment", -amount, post_split, f"to {child_name}"
+            )
+        )
+        return True
+
+    def bequest(self, from_name: str, to_name: str, site_id: str) -> None:
+        """Record a nest-claim bequest in the ledger (kin-flow, zero-token)."""
+        balance = self.leases[from_name].remaining_tokens if from_name in self.leases else 0
+        self._append(
+            LedgerEntry(
+                time.time(),
+                from_name,
+                "bequest",
+                0,
+                balance,
+                f"claim {site_id} -> {to_name}",
+            )
+        )
 
     def check_expired(self, now: float | None = None) -> list[str]:
         """Expire leases past their wall-clock expiry. Returns names reaped."""
@@ -139,5 +184,3 @@ class LeaseStore:
 
     def snapshot(self) -> dict[str, LeaseState]:
         return dict(self.leases)
-
-
