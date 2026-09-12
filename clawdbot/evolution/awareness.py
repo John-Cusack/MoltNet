@@ -59,7 +59,7 @@ class EconomicAwareness:
     @property
     def avg_cost_per_cycle(self) -> float:
         """What do I typically spend per cycle?"""
-        recent = self.cost_history[-self.history_window:]
+        recent = self.cost_history[-self.history_window :]
         if not recent:
             return 0.001  # Default existence cost
         return sum(recent) / len(recent)
@@ -67,7 +67,7 @@ class EconomicAwareness:
     @property
     def avg_income_per_cycle(self) -> float:
         """What do I typically earn per cycle?"""
-        recent = self.income_history[-self.history_window:]
+        recent = self.income_history[-self.history_window :]
         if not recent:
             return 0.0
         return sum(recent) / len(recent)
@@ -82,7 +82,7 @@ class EconomicAwareness:
         """How many cycles can I survive at current burn rate?"""
         burn = self.net_burn_rate
         if burn <= 0:
-            return float('inf')  # Profitable!
+            return float("inf")  # Profitable!
         if self.current_balance <= 0:
             return 0.0
         return self.current_balance / burn
@@ -177,7 +177,7 @@ class PerformanceAwareness:
     @property
     def recent_success_rate(self) -> float:
         """What's my recent success rate?"""
-        recent = self.task_outcomes[-self.history_window:]
+        recent = self.task_outcomes[-self.history_window :]
         if not recent:
             return 0.5  # Neutral prior
         return sum(1 for _, success in recent if success) / len(recent)
@@ -215,10 +215,7 @@ class PerformanceAwareness:
         for task_type, success in self.task_outcomes[-50:]:
             by_type[task_type].append(success)
 
-        return {
-            task_type: sum(outcomes) / len(outcomes)
-            for task_type, outcomes in by_type.items()
-        }
+        return {task_type: sum(outcomes) / len(outcomes) for task_type, outcomes in by_type.items()}
 
     def get_best_task_type(self) -> str | None:
         """What task type am I best at?"""
@@ -424,6 +421,12 @@ class SelfAwareness:
         safety_margin_cycles: int,
         min_success_rate: float,
         confidence_threshold: float,
+        *,
+        nests_enabled: bool = False,
+        has_live_claim: bool = True,
+        route_headroom_ok: bool = True,
+        ev_positive: bool = True,
+        endowment_safe: bool = True,
     ) -> tuple[bool, dict[str, Any]]:
         """Evaluate whether reproduction is advisable.
 
@@ -437,6 +440,13 @@ class SelfAwareness:
             safety_margin_cycles: Required runway for safety
             min_success_rate: Minimum required success rate
             confidence_threshold: Minimum confidence to reproduce
+            nests_enabled: Nest Economy on/off (colony.nests.enabled);
+                False keeps the legacy decision unchanged
+            has_live_claim: Gate 1 — parent holds a live, verified nest claim
+            route_headroom_ok: Gate 2a — the child's route has spare capacity
+            ev_positive: Gate 2c — expected value of the spawn is positive
+            endowment_safe: Gate 2b — the split leaves the parent a
+                survival-buffer runway
 
         Returns:
             Tuple of (should_reproduce, factors_dict)
@@ -476,12 +486,24 @@ class SelfAwareness:
         confidence = base_confidence + (urgency * 0.3)
         factors["confidence"] = confidence
 
-        # Decision
-        should = (
-            is_mature
-            and (has_runway or urgency > 0.7)  # Urgency can override runway requirement
-            and confidence >= confidence_threshold
+        # Nest Economy factors (NEST_ECONOMY.md §3): the outward-looking
+        # gates — is there a verified place, and tokens/endpoints to spare?
+        # Defaults keep the legacy decision unchanged (nests disabled).
+        factors["has_live_claim"] = has_live_claim
+        factors["route_headroom_ok"] = route_headroom_ok
+        factors["ev_positive"] = ev_positive
+        factors["endowment_safe"] = endowment_safe
+        nest_requirements_met = (not nests_enabled) or (
+            has_live_claim and route_headroom_ok and ev_positive and endowment_safe
         )
+        factors["nest_requirements_met"] = nest_requirements_met
+
+        # Decision
+        basic_requirements_met = is_mature and (
+            has_runway or urgency > 0.7  # Urgency can override runway requirement
+        )
+        meets_confidence = confidence >= confidence_threshold
+        should = basic_requirements_met and meets_confidence and nest_requirements_met
 
         return should, factors
 

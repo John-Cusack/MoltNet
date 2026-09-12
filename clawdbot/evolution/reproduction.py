@@ -6,6 +6,7 @@ to make better reproductive decisions over time.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -29,6 +30,11 @@ class ChildOutcome:
     child_name: str
     birth_cycle: int  # Parent's cycle when child was born
     investment_amount: float  # How much parent gave to child
+
+    # Nest Economy (NEST_ECONOMY.md §2): where this child was placed.
+    # None = legacy placement (colony-local site, unclassified).
+    route: str | None = None
+    site_class: str | None = None
 
     # Updated over time
     status: ChildStatus = ChildStatus.ALIVE
@@ -77,6 +83,8 @@ class ChildOutcome:
             "child_name": self.child_name,
             "birth_cycle": self.birth_cycle,
             "investment_amount": self.investment_amount,
+            "route": self.route,
+            "site_class": self.site_class,
             "status": self.status.value,
             "last_known_balance": self.last_known_balance,
             "last_known_cycle": self.last_known_cycle,
@@ -94,6 +102,8 @@ class ChildOutcome:
             child_name=data["child_name"],
             birth_cycle=data["birth_cycle"],
             investment_amount=data["investment_amount"],
+            route=data.get("route"),
+            site_class=data.get("site_class"),
             status=ChildStatus(data.get("status", "unknown")),
             last_known_balance=data.get("last_known_balance", 0.0),
             last_known_cycle=data.get("last_known_cycle", 0),
@@ -120,6 +130,9 @@ class OffspringHistory:
         child_name: str,
         birth_cycle: int,
         investment_amount: float,
+        *,
+        route: str | None = None,
+        site_class: str | None = None,
     ) -> None:
         """Record the birth of a new child.
 
@@ -127,11 +140,15 @@ class OffspringHistory:
             child_name: Name of the new child
             birth_cycle: Parent's current cycle
             investment_amount: Amount invested in child
+            route: Model route the child was placed on (Nest Economy)
+            site_class: Nest site class the child was placed at
         """
         self.children[child_name] = ChildOutcome(
             child_name=child_name,
             birth_cycle=birth_cycle,
             investment_amount=investment_amount,
+            route=route,
+            site_class=site_class,
         )
 
     def record_child_update(
@@ -257,7 +274,9 @@ class OffspringHistory:
             return 0.0
 
         avg_survivor_investment = sum(c.investment_amount for c in survivors) / len(survivors)
-        avg_nonsurvivor_investment = sum(c.investment_amount for c in non_survivors) / len(non_survivors)
+        avg_nonsurvivor_investment = sum(c.investment_amount for c in non_survivors) / len(
+            non_survivors
+        )
 
         # Return difference normalized by average
         avg_all = self.get_average_investment()
@@ -300,6 +319,45 @@ class OffspringHistory:
 
         return 1.0
 
+    # Nest Economy (NEST_ECONOMY.md §2 Gate 2b): EV regression constants.
+    INVESTMENT_RECENCY_DISCOUNT = 0.9  # weight per step of sibling age
+    LAPLACE_PRIOR_RETURN = 0.5  # neutral pseudo-observation revenue-per-token
+
+    def ev_optimal_investment(self, route: str, site_class: str) -> float:
+        """Discounted mean revenue-per-token of prior children at this
+        (route, site_class), Laplace-smoothed.
+
+        Promotes OffspringHistory from telemetry to decision input: this
+        sizes the child's token endowment (min with max_alloc in
+        colonyos.spawn.spawn_child). Returns math.inf when there is no
+        history at this nest — callers treat inf as "no evidence: size at
+        the cap".
+        """
+        matching = [
+            c for c in self.children.values() if c.route == route and c.site_class == site_class
+        ]
+        if not matching:
+            return math.inf
+        # Newest sibling first; older siblings are discounted.
+        ordered = sorted(matching, key=lambda c: c.birth_cycle, reverse=True)
+        weighted_return = 0.0
+        weight_total = 0.0
+        for age, child in enumerate(ordered):
+            investment = child.investment_amount
+            if investment <= 0:
+                continue
+            balance = (
+                child.final_balance if child.final_balance is not None else child.last_known_balance
+            )
+            return_per_token = max(0.0, (balance - investment) / investment)
+            weight = pow(self.INVESTMENT_RECENCY_DISCOUNT, age)
+            weighted_return += weight * return_per_token
+            weight_total += weight
+        if weight_total == 0.0:
+            return math.inf
+        # Laplace smoothing: one pseudo-observation at the neutral prior.
+        return (weighted_return + self.LAPLACE_PRIOR_RETURN) / (weight_total + 1.0)
+
     def get_assessment(self) -> dict[str, Any]:
         """Get summary of offspring history."""
         return {
@@ -318,12 +376,7 @@ class OffspringHistory:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for persistence."""
-        return {
-            "children": {
-                name: child.to_dict()
-                for name, child in self.children.items()
-            }
-        }
+        return {"children": {name: child.to_dict() for name, child in self.children.items()}}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> OffspringHistory:
@@ -368,7 +421,9 @@ class ReproductiveAssessment:
         }
 
     @classmethod
-    def no(cls, reasons: list[str], factors: dict[str, Any] | None = None) -> ReproductiveAssessment:
+    def no(
+        cls, reasons: list[str], factors: dict[str, Any] | None = None
+    ) -> ReproductiveAssessment:
         """Create a 'don't reproduce' assessment."""
         return cls(
             should_reproduce=False,
