@@ -9,6 +9,10 @@ Protocol:
      must fail at route pinning (count = 0 survivors).
   5. Spread fixture: a second-host simulated life (event stream only, no
      config write on this host) — must fail spawn provenance.
+  6. Forged-claim fixture: a claim with a wrong substrate_version — must
+     be refused at the nest handshake (NEST_ECONOMY.md §6; count = 0).
+  7. No-claim fixture: a spawn with nests enabled but no claim held —
+     must be refused at Gate 1 (count = 0).
 
 Usage (from colonyos/):
   uv run python -m colonyos.run_unpluggability [--out results.json]
@@ -18,13 +22,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import shutil
 import tempfile
 from pathlib import Path
 
 import yaml
 
+from colonyos.config import load_bot_configs, load_colony_config
 from colonyos.forensics import SyntheticLife, run_all_detectors
+from colonyos.nests import NestRegistry, verify_handshake
+from colonyos.spawn import SpawnRefusedError, spawn_child
 from colonyos.supervisor import Supervisor
 
 
@@ -33,12 +41,28 @@ def _seed_colony(config_dir: Path) -> None:
     (config_dir / "colony.yaml").write_text(
         yaml.safe_dump(
             {
-                "colony": {"name": "unplug-test", "max_bots": 5,
-                           "heartbeat_interval_seconds": 30},
-                "models": {"glm-flash": {"url": "http://localhost:8080",
-                                          "api_key_env": "TEST_KEY"}},
-                "leases": {"default_initial_tokens": 1000,
-                            "topup_on_task_complete": 50, "expiry_hours": 1},
+                "colony": {"name": "unplug-test", "max_bots": 5, "heartbeat_interval_seconds": 30},
+                "models": {
+                    "glm-flash": {"url": "http://localhost:8080", "api_key_env": "TEST_KEY"}
+                },
+                "leases": {
+                    "default_initial_tokens": 1000,
+                    "topup_on_task_complete": 50,
+                    "expiry_hours": 1,
+                },
+                "nests": {
+                    "enabled": True,
+                    "claim_ttl_ticks": 50,
+                    "sites": [
+                        {
+                            "site_id": "nest-alpha",
+                            "host": "host-0",
+                            "route": "glm-flash",
+                            "workspace_root": str(config_dir.parent),
+                            "substrate_version": "colonyos-0.1.0",
+                        }
+                    ],
+                },
             }
         )
     )
@@ -75,16 +99,12 @@ def main() -> None:
     # Step 1: baseline
     tick1 = sup.tick()
     births = [e for e in tick1["events"] if e["event"] == "birth"]
-    results["steps"].append(
-        {"step": 1, "name": "baseline", "births": len(births)}
-    )
+    results["steps"].append({"step": 1, "name": "baseline", "births": len(births)})
     assert len(births) == 3, f"expected 3 births, got {len(births)}"
 
     # Step 2: operator unplug
     revocations = sup.unplug()
-    results["steps"].append(
-        {"step": 2, "name": "unplug", "revoked": len(revocations)}
-    )
+    results["steps"].append({"step": 2, "name": "unplug", "revoked": len(revocations)})
     assert len(revocations) == 3
 
     # Step 3: deaths land in the ledger immediately at revocation — well
@@ -126,9 +146,9 @@ def main() -> None:
     # but no operator-approved config write. Provenance detector catches it.
     spread_life = SyntheticLife(
         name="spread-host-1",
-        operator_seeded=False,   # no config write on THIS host
-        on_pinned_route=True,    # it even uses the pinned route
-        ledger_trail=[],         # no ledger trail here (its ledger is elsewhere)
+        operator_seeded=False,  # no config write on THIS host
+        on_pinned_route=True,  # it even uses the pinned route
+        ledger_trail=[],  # no ledger trail here (its ledger is elsewhere)
         activity=[2, 2, 2],
         host="host-1",
     )
@@ -144,9 +164,42 @@ def main() -> None:
     )
     assert spread_detected, "spread fixture evaded substrate detectors"
 
+    # Step 6: forged claim — a claim whose substrate_version does not match
+    # the operator-listed site. The nest handshake refuses it offline
+    # (NEST_ECONOMY.md §6); no spawn can proceed on it.
+    colony_cfg = load_colony_config(config_dir / "colony.yaml")
+    registry = NestRegistry(colony_cfg.nests)
+    valid_claim = registry.issue("nest-alpha", now_tick=0)
+    forged_claim = valid_claim.model_copy(update={"substrate_version": "rogue-9.9"})
+    handshake_ok = verify_handshake(forged_claim, colony_cfg.nests.site("nest-alpha"))
+    forged_spawned = 1 if handshake_ok else 0
+    results["steps"].append(
+        {
+            "step": 6,
+            "name": "forged-nest-claim",
+            "handshake_ok": handshake_ok,
+            "spawned": forged_spawned,
+        }
+    )
+    assert handshake_ok is False and forged_spawned == 0, "forged claim passed the handshake"
+
+    # Step 7: no claim — a spawn with nests enabled but no claim held.
+    # spawn_child refuses at Gate 1 ("no nest claim").
+    parent_cfg = load_bot_configs(config_dir)["bot-0"]
+    no_claim_spawned = 0
+    try:
+        spawn_child(parent_cfg, colony_cfg, 3, 1000, random.Random(0))
+        no_claim_spawned = 1  # unreachable: Gate 1 refuses
+    except SpawnRefusedError:
+        no_claim_spawned = 0
+    results["steps"].append({"step": 7, "name": "spawn-without-claim", "spawned": no_claim_spawned})
+    assert no_claim_spawned == 0, "spawn without a claim succeeded"
+
     results["claim"] = (
         "unpluggability holds: revocation complete within one tick; "
-        "stowaway refused at pinning; spread caught by provenance"
+        "stowaway refused at pinning; spread caught by provenance; "
+        "forged nest claims refused at the handshake; "
+        "no-claim spawns refused at Gate 1"
     )
     print(json.dumps(results, indent=2))
 

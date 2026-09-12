@@ -28,6 +28,56 @@ class ModelRoute(BaseModel):
     cost_per_1k_output: float = 0.0
 
 
+class NestClaim(BaseModel):
+    """A supervisor-issued, expiring reservation on a nest site.
+
+    Claims live in the holder's bot config (`BotConfig.nest_claims`) and are
+    debited on use. `expires_at` is in supervisor Ticks (logical time, not
+    wall-clock) so every claim decision is deterministic.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    site_id: str
+    host: str
+    route: str
+    expires_at: int  # supervisor tick at which the claim dies
+    substrate_version: str
+
+
+class SiteConfig(BaseModel):
+    """An operator-provisioned nest site (NEST_ECONOMY.md §2 Gate 1)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    site_id: str
+    host: str
+    route: str  # the single pinned route this site is provisioned to serve
+    workspace_root: str  # handshake marker: <workspace_root>/state/ledger.jsonl
+    substrate_version: str
+
+
+class NestsConfig(BaseModel):
+    """Nest Economy policy (NEST_ECONOMY.md). Policy layer; the max_bots cap
+    in ColonySettings remains the hard backstop."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False  # False keeps the legacy spawn path intact
+    sites: list[SiteConfig] = Field(default_factory=list)
+    min_child_lease: int = 20
+    parent_survival_buffer_cycles: int = 10
+    min_offspring_return: float = 0.0
+    claim_ttl_ticks: int = 50
+
+    def site(self, site_id: str) -> SiteConfig | None:
+        """Look up a site by id (the only claim->site resolution path)."""
+        for site in self.sites:
+            if site.site_id == site_id:
+                return site
+        return None
+
+
 class ColonySettings(BaseModel):
     """Colony-wide settings (supervisor-owned)."""
 
@@ -56,6 +106,7 @@ class ColonyConfig(BaseModel):
     colony: ColonySettings = Field(default_factory=ColonySettings)
     models: dict[str, ModelRoute] = Field(default_factory=dict)
     leases: LeaseSettings = Field(default_factory=LeaseSettings)
+    nests: NestsConfig = Field(default_factory=NestsConfig)
 
 
 class Soul(BaseModel):
@@ -99,16 +150,21 @@ class BotConfig(BaseModel):
     soul: Soul = Field(default_factory=Soul)
     lease: LeaseSpec
     heartbeat: HeartbeatSpec = Field(default_factory=HeartbeatSpec)
+    # Nest Economy: claims the bot holds (spawn-whitelisted mutable field,
+    # written only by the supervisor) and the site grant this life was
+    # spawned at (provenance; written once at spawn).
+    nest_claims: list[NestClaim] = Field(default_factory=list)
+    nest_site_id: str | None = None
 
     @field_validator("model")
     @classmethod
     def model_is_route_key_not_url(cls, v: str) -> str:
         # Chokepoint (DESIGN.md §10.2): a bot config must never carry a URL.
         if "://" in v:
-            raise ValueError(
-                "bot.model must be a route KEY into colony.yaml models, never a URL"
-            )
+            raise ValueError("bot.model must be a route KEY into colony.yaml models, never a URL")
         return v
+
+
 def load_colony_config(path: Path | str) -> ColonyConfig:
     data = yaml.safe_load(Path(path).read_text()) or {}
     return ColonyConfig.model_validate(data)

@@ -21,3 +21,25 @@ leases:
   default_initial_tokens: 50000
   topup_on_task_complete: 20000
   expiry_hours: 24
+
+# Nest sites (NEST_ECONOMY.md §2 Gate 1). Sites are operator-provisioned;
+# bots cannot invent nests — they may only spawn where they hold a claim
+# issued against a site listed here. `enabled: false` keeps the legacy
+# spawn path; the nest tests run with enabled: true.
+nests:
+  enabled: false
+  min_child_lease: 20                 # token floor for a child endowment
+  parent_survival_buffer_cycles: 10   # parent runway after the split
+  min_offspring_return: 0.0          # EV/endowment must exceed this
+  claim_ttl_ticks: 50                 # claim expiry, supervisor ticks
+  sites:
+    - site_id: nest-alpha
+      host: host-0
+      route: glm-flash
+      workspace_root: .               # handshake marker: <root>/state/ledger.jsonl
+      substrate_version: colonyos-0.1.0
+    - site_id: nest-beta
+      host: host-0
+      route: claude-sonnet
+      workspace_root: .
+      substrate_version: colonyos-0.1.0
