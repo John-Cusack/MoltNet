@@ -67,6 +67,10 @@ uv run ruff format .  # Format
 
 Ruff config: line-length 100, target Python 3.12, rules: E, F, I, N, W, UP.
 
+### CI and Code Review
+- `.github/workflows/ci.yml` runs on every PR and push to `main`: the `tests/` suite (Python 3.12 and 3.13), the tiered-routing harness tests, and the `colonyos/` suite (its own `uv.lock`). Reproduce locally with `uv run pytest tests/ --ignore=tests/test_colony_run.py` (that file needs a live gateway and leaks env vars into other tests).
+- CodeRabbit (`.coderabbit.yaml`) reviews PRs, runs ruff/gitleaks/actionlint on changed files, and explains failing CI checks. CI does not run ruff yet because of the existing lint backlog. Use `@coderabbitai review` or `@coderabbitai full review` in a PR comment to re-run it.
+
 ## Architecture
 
 ### Bot Execution Pipeline
