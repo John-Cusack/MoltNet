@@ -236,6 +236,11 @@ class TestOpenClawBotLifecycle:
 class TestOpenClawBotReplication:
     """Tests for bot replication."""
 
+    @pytest.fixture(autouse=True)
+    def cerebras_api_key(self, monkeypatch):
+        # Mutation can switch the child to a Cerebras model, whose backend requires a key.
+        monkeypatch.setenv("CEREBRAS_API_KEY", "test-key")
+
     @pytest.mark.asyncio
     async def test_replicate_creates_child(self):
         """Test that replication creates a child bot."""

@@ -1,0 +1,149 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit AI code review for MoltNet.
+# Reference: https://docs.coderabbit.ai/reference/configuration
+#
+# CodeRabbit runs as a GitHub App (https://github.com/apps/coderabbitai); this file
+# takes effect once the app has access to the repository. It reviews every PR and
+# reads the results of .github/workflows/ci.yml through GitHub Checks, so failing
+# test runs get explained inline on the PR.
+
+language: en-US
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  sequence_diagrams: true
+  poem: false
+  in_progress_fortune: false
+
+  auto_review:
+    enabled: true
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+      - "[skip review]"
+
+  path_filters:
+    - "!**/uv.lock"
+    - "!**/__pycache__/**"
+    - "!.agents/**"
+    - "!data/**"
+    - "!paper/figures/**"
+    - "!**/*.png"
+    - "!**/*.pdf"
+
+  path_instructions:
+    - path: "clawdbot/sandbox/**"
+      instructions: |
+        Safety-critical containment code. Flag any change that weakens isolation:
+        enabling network by default, raising or removing CPU/memory/time limits,
+        broadening mounts, or widening the local-execution fallback used when Docker
+        is unavailable. Container teardown (stop/kill/rm) must still run on error paths.
+    - path: "clawdbot/fitness/sandbox.py"
+      instructions: |
+        Executes bot-generated code in a subprocess. Verify timeouts are always
+        enforced, the child process is killed on timeout, and no path evaluates
+        untrusted code in the parent interpreter.
+    - path: "{clawdbot/fitness/*verifiers.py,taskshop/verification.py,taskshop/payout.py}"
+      instructions: |
+        Verification and payout decide which bots earn money and therefore survive.
+        Check that a bot cannot get paid for unverified or partially verified work,
+        that scores stay within their documented range, and that content inside a
+        submission cannot influence its own verification.
+    - path: "clawdbot/evolution/**"
+      instructions: |
+        Death is the only selection pressure. Flag changes that let a bot avoid
+        bankruptcy or max-cycle death, reproduce without paying the configured cost,
+        or mutate fields meant to be immutable. Mutation rates come from
+        config/openclaw_config.yaml, not hard-coded constants.
+    - path: "{clawdbot/nests.py,colonyos/colonyos/nests.py}"
+      instructions: |
+        Nest Economy reproduction (colonyos/docs/NEST_ECONOMY.md). A child may only
+        be spawned when Gate 1 (a live, unconsumed nest claim serving the child's
+        route) and Gate 2 (headroom, EV, runway-buffer endowment) both pass. Check
+        boundary conditions (TTL expiry on the exact cycle, zero or negative
+        balances), that a claim cannot be consumed twice, and that bequeathed claims
+        only go to a living heir.
+    - path: "clawdbot/gateway/**"
+      instructions: |
+        Gateway manages Claude CLI slots with Cerebras overflow. Check that a slot is
+        released on every error and cancellation path, subprocess arguments are built
+        as a list (never shell=True or prompt text interpolated into a shell), and API
+        keys never appear in logs or HTTP responses.
+    - path: "clawdbot/backends/**"
+      instructions: |
+        All backends implement the LLMBackend ABC (generate, generate_chat,
+        health_check). Keep the factory's model-ID routing consistent with
+        config/llm-registry.yaml. API keys come from the environment only.
+    - path: "clawdbot/*_client.py"
+      instructions: |
+        Service clients must no-op when base_url is empty (self._enabled =
+        bool(base_url)) and retry with exponential backoff. A service outage must
+        never crash a bot cycle.
+    - path: "**/database.py"
+      instructions: |
+        Shared service pattern: aiosqlite with WAL mode and FTS5 virtual tables kept
+        in sync by triggers. SQL must be parameterized. Text passed to FTS5 MATCH
+        comes from bots and must be quoted or escaped.
+    - path: "colonyos/**"
+      instructions: |
+        ColonyOS is a separate package (own pyproject.toml and uv.lock) used as a
+        paper instrument. Changes to forensics detectors or run_coverage.py can change
+        published claims; call out any behavior change explicitly.
+    - path: "experiments/**"
+      instructions: |
+        Experiment harnesses behind paper results. Flag changes to scoring, seeds, or
+        fixtures that would silently change reported numbers.
+    - path: "tests/**"
+      instructions: |
+        pytest runs with asyncio_mode=auto, so async tests need no decorator. Tests
+        must not require a running gateway, LLM API keys, or network access unless
+        marked @pytest.mark.integration. Flag module-level os.environ mutation, which
+        leaks into other test files.
+    - path: "config/**"
+      instructions: |
+        Runtime configuration for the economy, mutation rates, and model registry.
+        Call out changes to rewards, existence costs, or reproduction thresholds,
+        since they change selection pressure and experiment outcomes.
+
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+    custom_checks:
+      - name: "Containment not weakened"
+        mode: warning
+        instructions: |
+          Fail if this PR weakens a containment or safety control: sandbox or
+          container isolation, network restrictions, resource limits, execution
+          timeouts, the kill switch or SafetyMonitor, or bankruptcy/max-cycle death.
+          Pass if no such code is touched, or if the change only tightens controls.
+
+  tools:
+    # Ruff uses the [tool.ruff] config in pyproject.toml. CI deliberately does not
+    # run ruff (the repo has a lint backlog), so CodeRabbit owns lint feedback; it
+    # skips its own ruff pass once a workflow runs ruff.
+    ruff:
+      enabled: true
+    # Standardized on ruff; avoid duplicate Python linter comments.
+    pylint:
+      enabled: false
+    flake8:
+      enabled: false
+    gitleaks:
+      enabled: true
+    actionlint:
+      enabled: true
+    # Reads GitHub Actions results and posts remediation for failing checks.
+    github-checks:
+      enabled: true
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "**/CLAUDE.md"
