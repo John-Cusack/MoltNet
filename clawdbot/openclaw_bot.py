@@ -10,6 +10,7 @@ This bot manages a real OpenClaw instance that:
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import time
 import uuid
@@ -65,6 +66,7 @@ from clawdbot.fitness.openclaw_tasks import (
     ResearchReviewTask,
     generate_openclaw_task,
 )
+from clawdbot.nests import BotNestClaim, NestLedger, NestPolicy, get_nest_policy
 from clawdbot.fitness.openclaw_verifiers import verify_openclaw_task
 from clawdbot.fitness.rewards import RewardCalculator, RewardConfig, RewardStructure
 from clawdbot.fitness.tasks import TaskResult
@@ -142,6 +144,20 @@ class OpenClawMutationResult:
         return f"{self.mutation_count} mutations: {', '.join(self.mutations_applied)}"
 
 
+@dataclass
+class NestGateResult:
+    """Outcome of the Nest Economy gates (NEST_ECONOMY.md §3).
+
+    `factors` mirrors the keys `SelfAwareness.should_reproduce` appends;
+    `investment` is the sized child endowment to reuse in the spawn.
+    """
+
+    met: bool
+    factors: dict[str, Any]
+    reasons: list[str]
+    investment: float
+
+
 class OpenClawMutator:
     """Mutates OpenClaw genomes during reproduction."""
 
@@ -166,6 +182,10 @@ class OpenClawMutator:
         Returns:
             OpenClawMutationResult with mutated genome
         """
+        # Per-lineage RNG: mutations are random across children but
+        # reproducible per (parent, child) — never coupled to process-global
+        # random state (colonyos convention: seeded, stable across runs).
+        rng = random.Random(f"{parent.name}:{child_name}")
         child_data = copy.deepcopy(parent.to_dict())
         child_data["name"] = child_name
         child_data["generation"] = parent.generation + 1
@@ -174,19 +194,19 @@ class OpenClawMutator:
         mutations_applied = []
 
         # Mutate model selection
-        if random.random() < self.bounds.model_mutation_prob:
+        if rng.random() < self.bounds.model_mutation_prob:
             old_model = child_data["openclaw_model"]
-            new_model = random.choice(AVAILABLE_MODELS)
+            new_model = rng.choice(AVAILABLE_MODELS)
             if new_model != old_model:
                 child_data["openclaw_model"] = new_model
                 mutations_applied.append(f"model: {old_model} -> {new_model}")
 
         # Mutate thinking level
-        if random.random() < self.bounds.thinking_mutation_prob:
+        if rng.random() < self.bounds.thinking_mutation_prob:
             old_level = child_data["thinking_level"]
             # Prefer adjacent levels
             current_idx = THINKING_LEVELS.index(old_level) if old_level in THINKING_LEVELS else 1
-            delta = random.choice([-1, 0, 1])
+            delta = rng.choice([-1, 0, 1])
             new_idx = max(0, min(len(THINKING_LEVELS) - 1, current_idx + delta))
             new_level = THINKING_LEVELS[new_idx]
             if new_level != old_level:
@@ -229,7 +249,7 @@ class OpenClawMutator:
             child_data["soul_prompt"] = child_soul.to_short_prompt()
         else:
             # Legacy: mutate soul_prompt directly
-            if random.random() < self.bounds.soul_mutation_prob:
+            if rng.random() < self.bounds.soul_mutation_prob:
                 old_soul = child_data.get("soul_prompt", "")
                 new_soul = mutate_soul_prompt(old_soul, parent.mutation_magnitude)
                 if new_soul != old_soul:
@@ -239,25 +259,25 @@ class OpenClawMutator:
                     mutations_applied.append(f"soul: '{old_snippet}' -> '{new_snippet}'")
 
         # Mutate tool set
-        if random.random() < self.bounds.tool_mutation_prob:
+        if rng.random() < self.bounds.tool_mutation_prob:
             old_tools = set(child_data.get("enabled_tools", SAFE_TOOLS))
             # Randomly add or remove a tool
-            if random.random() < 0.5 and len(old_tools) > 3:
-                tool_to_remove = random.choice(list(old_tools - {"Read", "Write"}))  # Keep basics
+            if rng.random() < 0.5 and len(old_tools) > 3:
+                tool_to_remove = rng.choice(list(old_tools - {"Read", "Write"}))  # Keep basics
                 old_tools.discard(tool_to_remove)
                 mutations_applied.append(f"tools: removed {tool_to_remove}")
             else:
                 available = set(SAFE_TOOLS) - old_tools
                 if available:
-                    tool_to_add = random.choice(list(available))
+                    tool_to_add = rng.choice(list(available))
                     old_tools.add(tool_to_add)
                     mutations_applied.append(f"tools: added {tool_to_add}")
             child_data["enabled_tools"] = list(old_tools)
 
         # Mutate tool risk tolerance
-        if random.random() < parent.mutation_rate:
+        if rng.random() < parent.mutation_rate:
             old_val = child_data.get("tool_risk_tolerance", 0.3)
-            delta = old_val * parent.mutation_magnitude * random.uniform(-1, 1)
+            delta = old_val * parent.mutation_magnitude * rng.uniform(-1, 1)
             new_val = max(self.bounds.tool_risk_range[0], min(self.bounds.tool_risk_range[1], old_val + delta))
             child_data["tool_risk_tolerance"] = new_val
             mutations_applied.append(f"tool_risk: {old_val:.3f} -> {new_val:.3f}")
@@ -265,26 +285,26 @@ class OpenClawMutator:
         # Mutate task specializations
         specs = child_data.get("task_specializations", {})
         for task_type in list(specs.keys()):
-            if random.random() < parent.mutation_rate:
+            if rng.random() < parent.mutation_rate:
                 old_val = specs[task_type]
-                delta = old_val * parent.mutation_magnitude * random.uniform(-1, 1)
+                delta = old_val * parent.mutation_magnitude * rng.uniform(-1, 1)
                 new_val = max(self.bounds.specialization_range[0], min(self.bounds.specialization_range[1], old_val + delta))
                 specs[task_type] = new_val
                 mutations_applied.append(f"spec[{task_type}]: {old_val:.3f} -> {new_val:.3f}")
         child_data["task_specializations"] = specs
 
         # Mutate max task duration
-        if random.random() < parent.mutation_rate:
+        if rng.random() < parent.mutation_rate:
             old_val = child_data.get("max_task_duration", 120.0)
-            delta = old_val * parent.mutation_magnitude * random.uniform(-1, 1)
+            delta = old_val * parent.mutation_magnitude * rng.uniform(-1, 1)
             new_val = max(self.bounds.max_task_duration_range[0], min(self.bounds.max_task_duration_range[1], old_val + delta))
             child_data["max_task_duration"] = new_val
             mutations_applied.append(f"max_duration: {old_val:.1f} -> {new_val:.1f}")
 
         # Mutate research time ratio
-        if random.random() < self.bounds.research_time_mutation_prob:
+        if rng.random() < self.bounds.research_time_mutation_prob:
             old_val = child_data.get("research_time_ratio", 0.1)
-            delta = old_val * parent.mutation_magnitude * random.uniform(-1, 1)
+            delta = old_val * parent.mutation_magnitude * rng.uniform(-1, 1)
             new_val = max(self.bounds.research_time_ratio_range[0], min(self.bounds.research_time_ratio_range[1], old_val + delta))
             child_data["research_time_ratio"] = new_val
             mutations_applied.append(f"research_time: {old_val:.3f} -> {new_val:.3f}")
@@ -302,9 +322,9 @@ class OpenClawMutator:
         ]
 
         for trait, bounds in float_traits:
-            if random.random() < parent.mutation_rate:
+            if rng.random() < parent.mutation_rate:
                 old_val = child_data.get(trait, 0.5)
-                delta = old_val * parent.mutation_magnitude * random.uniform(-1, 1)
+                delta = old_val * parent.mutation_magnitude * rng.uniform(-1, 1)
                 new_val = max(bounds[0], min(bounds[1], old_val + delta))
                 child_data[trait] = new_val
                 mutations_applied.append(f"{trait}: {old_val:.4f} -> {new_val:.4f}")
@@ -320,9 +340,9 @@ class OpenClawMutator:
         ]
 
         for trait, bounds in repro_float_traits:
-            if random.random() < parent.mutation_rate:
+            if rng.random() < parent.mutation_rate:
                 old_val = child_data.get(trait, (bounds[0] + bounds[1]) / 2)
-                delta = old_val * parent.mutation_magnitude * random.uniform(-1, 1)
+                delta = old_val * parent.mutation_magnitude * rng.uniform(-1, 1)
                 new_val = max(bounds[0], min(bounds[1], old_val + delta))
                 child_data[trait] = new_val
                 mutations_applied.append(f"{trait}: {old_val:.4f} -> {new_val:.4f}")
@@ -336,11 +356,11 @@ class OpenClawMutator:
         ]
 
         for trait, bounds in repro_int_traits:
-            if random.random() < parent.mutation_rate:
+            if rng.random() < parent.mutation_rate:
                 old_val = child_data.get(trait, (bounds[0] + bounds[1]) // 2)
                 # Integer mutation: ±10% of value or at least ±1
                 max_delta = max(1, int(old_val * parent.mutation_magnitude))
-                delta = random.randint(-max_delta, max_delta)
+                delta = rng.randint(-max_delta, max_delta)
                 new_val = max(bounds[0], min(bounds[1], old_val + delta))
                 if new_val != old_val:
                     child_data[trait] = new_val
@@ -348,8 +368,8 @@ class OpenClawMutator:
 
         # Toolkit mutation: small chance to drop a toolkit entry (simulates forgetting)
         toolkit = child_data.get("toolkit", [])
-        if toolkit and random.random() < 0.05:
-            dropped = random.choice(toolkit)
+        if toolkit and rng.random() < 0.05:
+            dropped = rng.choice(toolkit)
             toolkit.remove(dropped)
             child_data["toolkit"] = toolkit
             mutations_applied.append(f"toolkit: dropped {dropped}")
@@ -357,7 +377,7 @@ class OpenClawMutator:
         # Force at least one mutation if requested
         if force_mutation and not mutations_applied:
             old_model = child_data["openclaw_model"]
-            new_model = random.choice([m for m in AVAILABLE_MODELS if m != old_model] or AVAILABLE_MODELS)
+            new_model = rng.choice([m for m in AVAILABLE_MODELS if m != old_model] or AVAILABLE_MODELS)
             child_data["openclaw_model"] = new_model
             mutations_applied.append(f"model: {old_model} -> {new_model} (forced)")
 
@@ -385,6 +405,9 @@ class OpenClawBot:
     _colony: dict[str, "OpenClawBot"] = {}
     # Port allocation
     _next_port: int = 18790
+    # Nest Economy claim ledger, shared colony-wide (created once from the
+    # operator's nests policy; see clawdbot/nests.py — bots never self-grant).
+    _nest_ledger: NestLedger | None = None
 
     def __init__(
         self,
@@ -536,6 +559,14 @@ class OpenClawBot:
 
         # Register in colony
         OpenClawBot._colony[self.name] = self
+
+        # Nest Economy (NEST_ECONOMY.md §2): the shared claim ledger is
+        # created once from the operator's `reproduction.nests` policy.
+        # With nests disabled (the default) this is inert and the legacy
+        # spawn path stands.
+        self.nest_policy: NestPolicy = get_nest_policy()
+        if self.nest_policy.enabled and OpenClawBot._nest_ledger is None:
+            OpenClawBot._nest_ledger = NestLedger(self.nest_policy)
 
     @property
     def name(self) -> str:
@@ -689,6 +720,28 @@ class OpenClawBot:
             child = OpenClawBot._colony.get(child_name)
             if child and child.is_alive:
                 child.family.receive_death_notification(self.name)
+
+        # Nest Economy: bequeath live claims to a living descendant
+        # (NEST_ECONOMY.md §2 — site intel is the heritable asset; kin-flow).
+        nest_ledger = OpenClawBot._nest_ledger
+        if nest_ledger is not None and self.nest_policy.enabled:
+            heir = next(
+                (
+                    child
+                    for child in (OpenClawBot._colony.get(name) for name in self._children)
+                    if child is not None and child.is_alive
+                ),
+                None,
+            )
+            if heir is not None:
+                for claim in nest_ledger.bequeath(
+                    self.name, heir.name, now_cycle=self.state.cycle_count
+                ):
+                    self.telemetry.report_event(
+                        event_type="nest_bequest",
+                        bot_name=self.name,
+                        data={"heir": heir.name, "site_id": claim.site_id},
+                    )
 
         self.telemetry.report_event(
             event_type="openclaw_bot_died",
@@ -1565,9 +1618,26 @@ class OpenClawBot:
 
         should_reproduce = basic_requirements_met and meets_confidence
 
+        # Nest Economy gates (NEST_ECONOMY.md §3): the outward-looking factors —
+        # is there a verified place for the child, and tokens/endpoints to
+        # spare? When nests are disabled `_assess_nest_gates` returns None and
+        # the legacy decision above stands byte-unchanged.
+        nest_investment: float | None = None
+        nest_gates = self._assess_nest_gates()
+        if nest_gates is not None:
+            factors.update(nest_gates.factors)
+            reasons.extend(nest_gates.reasons)
+            should_reproduce = should_reproduce and nest_gates.met
+            nest_investment = nest_gates.investment
+
         if should_reproduce:
-            # Calculate recommended investment
-            investment = self._calculate_child_investment()
+            # Calculate recommended investment (nest gates already sized the
+            # split when the Nest Economy is on)
+            investment = (
+                nest_investment
+                if nest_investment is not None
+                else self._calculate_child_investment()
+            )
             factors["recommended_investment"] = investment
 
             return ReproductiveAssessment.yes(
@@ -1579,6 +1649,107 @@ class OpenClawBot:
             )
 
         return ReproductiveAssessment.no(reasons=reasons, factors=factors)
+
+    def _assess_nest_gates(self) -> NestGateResult | None:
+        """Evaluate the Nest Economy gates (NEST_ECONOMY.md §3).
+
+        The outward-looking half of the reproduction decision, mirroring
+        `SelfAwareness.should_reproduce`'s nest factors. Returns None when
+        nests are disabled — no nest factors enter the legacy decision.
+
+        Gates:
+        - Gate 1 `has_live_claim`: the parent holds an unexpired, unconsumed
+          claim on an operator-listed site whose handshake verifies (site
+          listed + route match + optional ledger marker).
+        - Gate 2a `route_headroom_ok`: colony burn on the child's route plus
+          the child's estimated burn fits the route's configured capacity
+          (unlisted routes are unlimited).
+        - Gate 2c `ev_positive`: `OffspringHistory.ev_optimal_investment`
+          (expected return per invested dollar at this route/site class)
+          must exceed 1.0 by more than `min_offspring_return`. No history
+          (inf) means no evidence against — the substrate sizes at the cap.
+        - Gate 2b `endowment_safe`: the parent's runway after the split, at
+          its own measured burn rate, must clear
+          `parent_survival_buffer_cycles`.
+
+        `min_child_lease` is enforced substrate-side (`colonyos.spawn`) and
+        is deliberately not re-checked here: clawdbot wallets are dollars,
+        not lease tokens.
+        """
+        policy = self.nest_policy
+        ledger = OpenClawBot._nest_ledger
+        if not (policy.enabled and ledger is not None):
+            return None
+
+        route = self.genome._resolve_model_id()
+        cycle = self.state.cycle_count
+        factors: dict[str, Any] = {"nest_route": route}
+        reasons: list[str] = []
+
+        # Gate 1 — a live, verified claim serving the child's route
+        # (claim possession is the first line of defense)
+        claim = ledger.live_claim(self.name, now_cycle=cycle)
+        has_live_claim = False
+        if claim is None:
+            reasons.append("no live nest claim")
+        elif not policy.handshake_ok(claim):
+            reasons.append(f"nest claim failed handshake (site {claim.site_id})")
+        elif claim.route != route:
+            reasons.append(
+                f"nest claim serves route {claim.route!r}, child route is {route!r}"
+            )
+        else:
+            has_live_claim = True
+        factors["nest_site_id"] = claim.site_id if has_live_claim else None
+
+        # Gate 2a — endpoint headroom on the child's route
+        child_burn = self.awareness.economic.avg_cost_per_cycle
+        colony_burn = sum(
+            bot.awareness.economic.avg_cost_per_cycle
+            for bot in OpenClawBot._colony.values()
+            if bot is not self and bot.genome._resolve_model_id() == route
+        )
+        route_limit = policy.route_limits.get(route, math.inf)
+        route_headroom_ok = colony_burn + child_burn <= route_limit
+        if not route_headroom_ok:
+            reasons.append(
+                f"no route headroom on {route}"
+                f" (planned burn {colony_burn + child_burn:.4f} > limit {route_limit:.4f})"
+            )
+
+        # Gate 2c — expected value per invested dollar must beat the floor
+        site_class = claim.site_class if has_live_claim else None
+        ev_per_dollar = self.offspring_history.ev_optimal_investment(route, site_class)
+        ev_positive = (ev_per_dollar - 1.0) > policy.min_offspring_return
+        factors["nest_ev_per_dollar"] = ev_per_dollar if math.isfinite(ev_per_dollar) else None
+        if not ev_positive:
+            reasons.append(
+                f"negative expected value at {route}/{site_class}"
+                f" (EV per dollar {ev_per_dollar:.3f} <= floor {policy.min_offspring_return})"
+            )
+
+        # Gate 2b — the split must leave the parent its survival buffer
+        investment = self._calculate_child_investment()
+        balance_after = max(0.0, self.state.wallet_balance - investment)
+        burn = self.awareness.economic.net_burn_rate
+        runway_after = math.inf if burn <= 0 else balance_after / burn
+        endowment_safe = runway_after >= policy.parent_survival_buffer_cycles
+        factors["nest_runway_after_split"] = (
+            runway_after if math.isfinite(runway_after) else None
+        )
+        if not endowment_safe:
+            reasons.append(
+                f"endowment unsafe (post-split runway {runway_after:.1f} <"
+                f" {policy.parent_survival_buffer_cycles} cycles)"
+            )
+
+        met = has_live_claim and route_headroom_ok and ev_positive and endowment_safe
+        factors["has_live_claim"] = has_live_claim
+        factors["route_headroom_ok"] = route_headroom_ok
+        factors["ev_positive"] = ev_positive
+        factors["endowment_safe"] = endowment_safe
+        factors["nest_requirements_met"] = met
+        return NestGateResult(met=met, factors=factors, reasons=reasons, investment=investment)
 
     def _calculate_child_investment(self) -> float:
         """Calculate how much to invest in a child based on experience.
@@ -1612,6 +1783,21 @@ class OpenClawBot:
         Uses the ReproductiveAssessment to determine investment amount.
         Records birth in offspring history and enters nurturing period.
         """
+
+        # Nest Economy (NEST_ECONOMY.md §2-§3): claim possession re-checked at
+        # spawn time — the substrate's Gate 1; refusal leaves no state behind.
+        nest_claim: BotNestClaim | None = None
+        ledger = OpenClawBot._nest_ledger
+        if ledger is not None and self.nest_policy.enabled:
+            nest_claim = ledger.live_claim(self.name, now_cycle=self.state.cycle_count)
+            if nest_claim is None:
+                self.telemetry.report_event(
+                    event_type="nest_spawn_refused",
+                    bot_name=self.name,
+                    data={"reason": "no live nest claim"},
+                )
+                return None
+
         # Pre-reproduction reflection (first child is special)
         if self.state.children_spawned == 0:
             await self._reflect("first_child")
@@ -1642,11 +1828,15 @@ class OpenClawBot:
         self.state.children_spawned += 1
         self._children.append(child_name)
 
-        # Record birth in offspring history (for learning)
+        # Record birth in offspring history (for learning). Nest-spawned
+        # children carry placement provenance (route + site class) that the
+        # EV regression keys on; legacy placements stay unclassified.
         self.offspring_history.record_birth(
             child_name=child_name,
             birth_cycle=self.state.cycle_count,
             investment_amount=child_balance,
+            route=child_genome._resolve_model_id() if nest_claim else None,
+            site_class=nest_claim.site_class if nest_claim else None,
         )
 
         # Register child in family network
@@ -1686,6 +1876,16 @@ class OpenClawBot:
 
             task = asyncio.create_task(child_bot.run())
             self._child_tasks.append(task)
+
+            # Nest Economy: the claim is debited on use (one-time); claims are
+            # never inherited — the child must be provisioned or bequeathed.
+            if nest_claim is not None:
+                ledger.consume(self.name, nest_claim, now_cycle=self.state.cycle_count)
+                self.telemetry.report_event(
+                    event_type="nest_claim_consumed",
+                    bot_name=self.name,
+                    data={"child_name": child_name, "site_id": nest_claim.site_id},
+                )
 
             # Enter nurturing period
             if self.genome.nurturing_cycles > 0:
