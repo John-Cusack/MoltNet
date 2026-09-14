@@ -85,6 +85,7 @@ Hard refusals from the substrate (`spawn.py`) stay and gain two: `SpawnRefusedEr
 | `clawdbot/evolution/awareness.py` | `SelfAwareness.should_reproduce` gains nest/headroom/EV factors (signature-compatible; new factors in `factors_dict`) — DONE |
 | `clawdbot/evolution/reproduction.py` | `OffspringHistory` feeds `ev_optimal_investment(route, site_class)` — promote existing tracking from telemetry to decision input — DONE |
 | `config/openclaw_config.yaml` / `colony.yaml` | reproduction + nests sections — DONE |
+| `clawdbot/openclaw_bot.py` | `_assess_nest_gates` evaluates Gate 1 (live claim serving the child's route) + 2a headroom + 2c EV + 2b runway-buffer, mirroring `SelfAwareness.should_reproduce`; `_replicate` consumes the claim and records route/site_class provenance; `_die` bequeaths live claims to a living child; `clawdbot/nests.py` parses `reproduction.nests` (path via `OPENCLAW_CONFIG_PATH`); claim TTL is measured in the bot's cycle clock; `min_child_lease` stays substrate-enforced — DONE |
 | `tests/test_nests.py` (new), `tests/test_substrate.py` | claim expiry, no-claim refusal, handshake failure, headroom refusal, runway-buffer refusal, bequest flow — DONE |
 
 Determinism: claim acquisition and EV draws seeded per (bot, tick) like existing rng use; hermetic (no network in the handshake stub).

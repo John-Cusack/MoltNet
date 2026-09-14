@@ -418,12 +418,25 @@ reproduction:
   # Nest Economy (colonyos/docs/NEST_ECONOMY.md): two-gate reproduction.
   # Mirrors ColonyConfig.nests (colonyos/colonyos/config.py) — the
   # authoritative schema lives there; this block documents operator intent.
+  # clawdbot side: clawdbot/nests.py parses this block; bots evaluate the
+  # gates in OpenClawBot._assess_nest_gates and consume claims on spawn.
   nests:
     enabled: false                    # false = legacy spawn path
     min_child_lease: 20               # token floor for a child endowment
+                                      # (substrate-enforced, spawn.py)
     parent_survival_buffer_cycles: 10 # parent runway after the split
-    min_offspring_return: 0.0         # EV/endowment must exceed this
-    claim_ttl_ticks: 50               # nest claim expiry, supervisor ticks
+    min_offspring_return: 0.0         # EV per invested dollar must exceed this
+    claim_ttl_ticks: 50               # claim expiry; bot-side clock = bot cycles
+    route_limits: {}                  # optional per-route capacity ($/cycle);
+                                      # unlisted routes are unlimited
+    sites: []                         # operator-provisioned nest sites, e.g.:
+    #  - site_id: nest-alpha
+    #    host: host-0
+    #    route: opus                    # resolved model route (genome
+    #                                    # _resolve_model_id: opus/sonnet/...)
+    #    site_class: premium            # EV regression key with OffspringHistory
+    #    workspace_root: .              # optional handshake marker:
+    #                                    # <root>/state/ledger.jsonl
 
   # Kin cooperation (Hamilton's rule)
   kinship:
